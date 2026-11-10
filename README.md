@@ -4,9 +4,9 @@ Edizione Gold di lusso per **Luongo Tombola 90 Italia** con tabellone TV studio,
 
 ---
 
-## 🔑 Credenziali, Password & Database
+## 🔑 Credenziali, Sicurezza & Database
 
-- **Password Console Regia:** `tombola90` (oppure `admin`)
+- **Accesso Console Regia:** Protetto da Crittografia SHA-256 (Password riservata all'amministratore)
 - **Database Cloud:** Google Cloud Firebase Firestore (NoSQL)
 - **ID Database Firestore:** `ai-studio-luongotombola90i-7d9a7964-caed-43e3-a2ea-3f12d876f720`
 - **Progetto Firebase:** `agile-lamp-6xq1s`

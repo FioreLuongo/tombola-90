@@ -116,7 +116,7 @@ async function createGuidePDF() {
     font: fontBold,
     color: darkNavy,
   });
-  page1.drawText('- Password di Accesso Regia Console:  tombola90  (oppure admin)', {
+  page1.drawText('- Password di Accesso Regia Console:  Crittografia SHA-256 (Riservata)', {
     x: 45,
     y: y - 31,
     size: 9,
@@ -483,7 +483,7 @@ async function createGuidePDF() {
     font: fontBold,
     color: textDark,
   });
-  page3.drawText('   Apri il sito su un tablet o portatile, clicca su "Regia" in alto, inserisci la password "tombola90".', {
+  page3.drawText('   Apri il sito su un tablet o portatile, clicca su "Regia" in alto, inserisci la password password crittografata.', {
     x: 45,
     y: y - 89,
     size: 8.5,

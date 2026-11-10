@@ -123,7 +123,7 @@ async function generateExactOnlineGuidePDF() {
     font: fontBold,
     color: darkNavy,
   });
-  page1.drawText('- Password di Accesso Regia:  tombola90  (oppure admin)', {
+  page1.drawText('- Accesso Console Regia:  Protetto da Crittografia SHA-256 (Password Riservata)', {
     x: 45,
     y: y - 31,
     size: 9,
@@ -537,7 +537,7 @@ async function generateExactOnlineGuidePDF() {
     'e clicca in alto su "Modalita TV". Apparira il grande tabellone con animazioni 3D flip a 180 gradi,',
     'il countdown radiale circolare, la voce della Smorfia Napoletana e il badge rollover premi.',
     'CONSOLE REGIA (Amministratore): Apri il sito da un tablet, telefono o computer portatile, clicca su "Regia"',
-    'ed entra con la password:  tombola90  (oppure admin).',
+    'ed entra inserendo la tua password riservata (crittografata SHA-256).',
     'Dalla Regia comandi in tempo reale: estrazione automatica/singola, velocita countdown, generazione cartelle A4,',
     'trasmissione di loghi live sullo schermo TV e il salvataggio/richiamo del Montepremi nel Database Cloud.',
   ];
@@ -548,7 +548,7 @@ async function generateExactOnlineGuidePDF() {
       x: 45,
       y: uY,
       size: 7.9,
-      font: ul.startsWith('SCHERMO') || ul.startsWith('CONSOLE') || ul.includes('tombola90') ? fontBold : fontRegular,
+      font: ul.startsWith('SCHERMO') || ul.startsWith('CONSOLE') || ul.includes('SHA-256') ? fontBold : fontRegular,
       color: textDark,
     });
     uY -= 11.5;

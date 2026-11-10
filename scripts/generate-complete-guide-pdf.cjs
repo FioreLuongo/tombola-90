@@ -125,7 +125,7 @@ async function generateCompleteProjectReportPDF() {
     font: fontRegular,
     color: textDark,
   });
-  page1.drawText('- Password di Accesso Regia:  tombola90  (oppure admin)', {
+  page1.drawText('- Password di Accesso Regia:  Crittografia SHA-256 (Riservata)', {
     x: 45,
     y: y - 46,
     size: 8.8,
@@ -196,7 +196,7 @@ async function generateCompleteProjectReportPDF() {
   y -= 16;
 
   const regiaItems = [
-    'Accesso Protetto: La regia si apre con password ("tombola90" o "admin") con blocco sessione temporaneo.',
+    'Accesso Protetto: La regia si apre con password (password crittografata SHA-256) con blocco sessione temporaneo.',
     'Pulsante Schermo Intero Regia: Nuovo pulsante in testata per passare a tutto schermo durante gli eventi.',
     'Banco Estrazioni & Controlli: Tasti Play Automatico, Pausa, Estrai Singolo e Reset Partita.',
     'Mini-Tabellone 90 Numeri: Griglia di monitoraggio compatta in tempo reale per verificare i numeri estratti.',

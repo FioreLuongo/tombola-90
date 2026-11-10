@@ -66,8 +66,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
 
     // ===== CRITTOGRAFIA SHA-256 ACCESSO REGIA AMMINISTRATORE =====
-    // Hash irreversibile SHA-256: la password in chiaro "280765" non è presente nel codice
-    const REGIA_ADMIN_HASH = "0a6a0ea5d50b731e76c02a7eafd7f09c9f483170d1a25df163183ba45be0e249";
+    // Verifica crittografica SHA-256: nessuna credenziale in chiaro presente nel sorgente
+    const REGIA_ADMIN_HASH = "0963b527665a0b16ee41b216670054f97bf79d2da5cda69104f64bd1fa5fc042";
 
     async function computeSha256(str) {
         const encoder = new TextEncoder();
