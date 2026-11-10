@@ -1,0 +1,6 @@
+{
+  "name": "LUONGO Tombola 90 Italia - GOLD EDITION",
+  "description": "Edizione Gold di lusso per Luongo Tombola 90 Italia con tabellone TV studio, generatore cartelle A4, Intelligenza Estrazioni, Smorfia Napoletana e montepremi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

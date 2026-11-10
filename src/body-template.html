@@ -1,0 +1,240 @@
+<div class="popup-overlay" id="tombolaPopup">
+    <div class="popup-content">
+        <div style="font-size: 60px; color: var(--success-color); margin-bottom: 15px;"><i class="fas fa-trophy"></i></div>
+        <h2 id="popupTitle">Tombola Completata!</h2>
+        <p id="popupMessage">Tutti i 90 numeri sono stati estratti. Congratulazioni!</p>
+        <button class="popup-close" id="popupClose">OK</button>
+    </div>
+</div>
+<div class="win-popup-overlay" id="winPopup">
+    <div class="win-popup-content">
+        <div style="font-size: 60px; color: var(--warning-color); margin-bottom: 15px;"><i class="fas fa-trophy"></i></div>
+        <div class="win-popup-title" id="winPopupTitle">VINCITA!</div>
+        <div class="win-popup-details" id="winPopupDetails"></div>
+        <div class="win-popup-cartella-id" id="winPopupCartellaId"></div>
+        <div class="win-popup-numbers" id="winPopupNumbers"></div>
+        <div class="win-popup-details" id="winPopupWinners"></div>
+        <button class="win-popup-close" id="winPopupClose">CONTINUA</button>
+    </div>
+</div>
+<div class="error-popup-overlay" id="errorPopup">
+    <div class="error-popup-content">
+        <div style="font-size: 60px; color: var(--warning-color); margin-bottom: 15px;"><i class="fas fa-exclamation-triangle"></i></div>
+        <h2 id="errorPopupTitle">Attenzione</h2>
+        <p id="errorPopupMessage"></p>
+        <button class="error-popup-close" id="errorPopupClose">OK</button>
+    </div>
+</div>
+<div class="cartelle-section" id="cartelleSection">
+    <div class="cartelle-fixed-header">
+        <div class="cartelle-header">
+            <div class="cartelle-title" id="cartelleTitle">Generatore Cartelle Tombola 90</div>
+            <div class="cartelle-controls">
+                <button class="cartelle-btn cartelle-generate" id="generateCartelle"><i class="fas fa-plus-circle"></i> <span id="generate-text">Genera Cartelle</span></button>
+                <button class="cartelle-btn cartelle-pdf" id="exportPDF"><i class="fas fa-file-pdf"></i> <span id="export-text">Esporta PDF</span></button>
+                <button class="cartelle-btn cartelle-json-export" id="exportJSON"><i class="fas fa-file-export"></i> <span id="export-json-text">Esporta JSON</span></button>
+                <button class="cartelle-btn cartelle-json-import" id="importJSON"><i class="fas fa-file-import"></i> <span id="import-json-text">Importa JSON</span></button>
+                <button class="cartelle-btn cartelle-reset" id="resetCartelle"><i class="fas fa-redo"></i> <span id="reset-cartelle-text">Reset Cartelle</span></button>
+                <button class="cartelle-btn cartelle-close" id="closeCartelle"><i class="fas fa-times"></i> <span id="close-text">Chiudi</span></button>
+            </div>
+        </div>
+        <div class="cartelle-input-group">
+            <div><div class="cartelle-label" id="gameIdLabel">ID Gioco:</div><input type="text" class="cartelle-input" id="gameId" value="TOM001" placeholder="ID Gioco"></div>
+            <div><div class="cartelle-label" id="numGiocatoriLabel">Numero Giocatori:</div><input type="number" class="cartelle-input" id="numGiocatori" min="1" max="20" value="1" placeholder="Giocatori"></div>
+            <div><div class="cartelle-label" id="startSheetLabel">Foglio Iniziale:</div><input type="number" class="cartelle-input" id="startSheet" min="1" max="1000" value="1" placeholder="Foglio Iniziale"></div>
+            <div><div class="cartelle-label" id="participatingGiocatoriLabel">Giocatori Partecipanti:</div><input type="number" class="cartelle-input" id="participatingGiocatori" min="0" max="20" value="0" placeholder="0"></div>
+        </div>
+        <div class="cartelle-stats" id="cartelleStats">
+            <div class="stat-item"><div class="stat-value" id="totalCartelle">0</div><div class="stat-label" id="total-cartelle-label">Cartelle Totali</div></div>
+            <div class="stat-item"><div class="stat-value" id="totalFogli">0</div><div class="stat-label" id="total-fogli-label">Fogli Totali</div></div>
+            <div class="stat-item"><div class="stat-value" id="totalGiocatori">0</div><div class="stat-label" id="total-giocatori-label">Giocatori</div></div>
+            <div class="stat-item"><div class="stat-value" id="totalParticipatingGiocatori">0</div><div class="stat-label" id="total-participating-label">Partecipanti</div></div>
+        </div>
+    </div>
+    <div class="cartelle-scrollable-container" id="cartelleContainer"></div>
+</div>
+<div class="pdf-preview" id="pdfPreview">
+    <div class="pdf-preview-content" id="pdfPreviewContent">
+        <button class="pdf-preview-close" id="closePdfPreview"><i class="fas fa-times"></i></button>
+        <div id="pdfPreviewContainer"></div>
+    </div>
+</div>
+<div class="json-import-overlay" id="jsonImportOverlay">
+    <div class="json-import-content">
+        <button class="json-import-close" id="closeJsonImport"><i class="fas fa-times"></i></button>
+        <h3><i class="fas fa-file-import"></i> <span id="import-json-title">Importa Cartelle da JSON</span></h3>
+        <div class="json-info">
+            <p><strong>Formato JSON atteso:</strong></p>
+            <pre>{"gameId": "TOM001","cartelle":[]}</pre>
+            <p><strong>Opzione alternativa:</strong> Carica un file JSON</p>
+            <input type="file" id="jsonFileUpload" accept=".json" style="margin: 10px 0;">
+        </div>
+        <textarea class="json-textarea" id="jsonImportTextarea" placeholder="Incolla qui il JSON delle cartelle..."></textarea>
+        <button class="json-import-btn" id="confirmJsonImport"><i class="fas fa-check"></i> <span id="confirm-import-text">Importa Cartelle</span></button>
+    </div>
+</div>
+<div class="ai-analysis-panel" id="aiAnalysisPanel">
+    <div class="ai-analysis-header">
+        <div class="ai-analysis-title" id="aiAnalysisTitle">Analisi Intelligenza Estrazioni V12.3.3</div>
+        <button class="ai-analysis-close" id="aiAnalysisClose"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="ai-analysis-content" id="aiAnalysisContent"></div>
+</div>
+<header>
+    <div class="custom-title-box">
+        <span>Luongo Tombola 90 Italia - GOLD EDITION</span>
+        <div class="dice-container"><i class="fas fa-dice dice-1"></i><i class="fas fa-dice dice-2"></i></div>
+    </div>
+    <div class="clock">
+        <div class="clock-unit"><span class="clock-value" id="hours">00</span><span class="clock-label" id="hours-label">Hours</span></div>
+        <div class="clock-unit"><span class="clock-value" id="minutes">00</span><span class="clock-label" id="minutes-label">Minutes</span></div>
+        <div class="clock-unit"><span class="clock-value" id="seconds">00</span><span class="clock-label" id="seconds-label">Seconds</span></div>
+    </div>
+</header>
+<nav>
+    <div class="nav-links">
+        <a href="#" id="navHomeLink"><i class="fas fa-home"></i> <span id="nav-home">Home</span></a>
+        <a href="#" id="navCartelleLink"><i class="fas fa-ticket-alt"></i> <span id="nav-cards">Cartelle</span></a>
+        <a href="#" id="tombolaItalia" class="tombola-option"><i class="fas fa-flag"></i> <span id="tombola-italia-text">Tombola Italia</span></a>
+    </div>
+    <div class="nav-options">
+        <div class="nav-extra-buttons">
+            <button class="nav-btn" id="fullscreenBtn"><i class="fas fa-tv"></i> <span id="tv-mode-text">Modalità TV</span></button>
+            <button class="nav-btn" id="voiceControlBtn"><i class="fas fa-volume-up"></i> <span id="voice-text">Voce</span></button>
+            <button class="nav-btn ai-toggle active" id="aiIntelligenceBtn"><i class="fas fa-brain"></i> <span id="ai-intelligence-text">Intelligenza Estrazioni</span></button>
+        </div>
+        <button class="audio-toggle" id="audioToggle"><i class="fas fa-volume-up"></i> <span id="audio-text">Audio ON</span></button>
+        <div class="language-toggle"><span id="lang-it">IT</span><label class="switch"><input type="checkbox" id="languageSwitch"><span class="slider"></span></label><span id="lang-en">EN</span></div>
+        <div class="theme-toggle"><span id="theme-light">Light</span><label class="switch"><input type="checkbox" id="themeSwitch"><span class="slider"></span></label><span id="theme-dark">Dark</span></div>
+    </div>
+</nav>
+<div class="main-container">
+    <div class="main-layout">
+        <div class="board-container"><div class="board" id="board"></div></div>
+        <div class="controls-section">
+            <div class="top-controls">
+                <div class="card" style="width: 500px; height: 400px;">
+                    <h2><i class="fas fa-star"></i> <span id="extracted-number-title">Numero Estratto</span></h2>
+                    <div class="current-number" id="currentNumber">--</div>
+                    <div class="smorfia-meaning" id="smorfiaMeaning">
+                        <span class="smorfia-label" id="smorfiaLabel">La Smorfia:</span>
+                        <span class="smorfia-text" id="smorfiaText">--</span>
+                    </div>
+                    <div class="progress-container"><div class="progress-bar" id="extractionProgress"></div></div>
+                    <div class="extraction-stats" id="extractionStats">
+                        <div class="stat-item"><i class="fas fa-check-circle stat-icon" style="color: var(--success-color);"></i><span id="extracted-label">Estratti:</span><span class="stat-value" id="extractedCount">0</span></div>
+                        <div class="stat-item"><i class="fas fa-clock stat-icon" style="color: var(--warning-color);"></i><span id="remaining-label">Rimanenti:</span><span class="stat-value" id="remainingCount">90</span></div>
+                    </div>
+                    <div style="font-size: 12px; margin-top: 5px;"><span id="progress-label">Progresso:</span> <span id="progressText">0%</span></div>
+                </div>
+                <div class="card" style="width: 150px; height: 400px;">
+                    <h2><i class="fas fa-history"></i> <span id="last-numbers-title">Ultimi 5</span></h2>
+                    <div class="last-numbers-container-vertical" id="lastNumbersContainer">
+                        <div class="last-number-vertical">--</div><div class="last-number-vertical">--</div><div class="last-number-vertical">--</div><div class="last-number-vertical">--</div><div class="last-number-vertical">--</div>
+                    </div>
+                </div>
+                <div class="right-column">
+                    <div class="montepremi-container" style="height: 240px;">
+                        <div class="montepremi-header"><h2><i class="fas fa-coins"></i> <span id="prize-pool-title">Montepremi</span></h2></div>
+                        <div class="montepremi-input-container">
+                            <input type="number" class="montepremi-input" id="prizePool" placeholder="Somma totale" min="0" value="0">
+                            <select class="currency-select" id="currencySelect"><option value="€">€</option><option value="£">£</option><option value="$">$</option></select>
+                        </div>
+                        <div class="premi-list">
+                            <div class="premi-item"><span><i class="fas fa-star gold-text"></i> <span id="gold-text">Numero Gold</span></span><span class="premi-value" id="goldPrize">-- <span class="percentage">(5%)</span></span></div>
+                            <div class="premi-item"><span><i class="fas fa-dice-two"></i> <span id="ambo-text">Ambo</span></span><span class="premi-value" id="amboPrize">-- <span class="percentage">(5%)</span></span></div>
+                            <div class="premi-item"><span><i class="fas fa-dice-three"></i> <span id="terno-text">Terno</span></span><span class="premi-value" id="ternoPrize">-- <span class="percentage">(10%)</span></span></div>
+                            <div class="premi-item"><span><i class="fas fa-dice-four"></i> <span id="quaterna-text">Quaterna</span></span><span class="premi-value" id="quaternaPrize">-- <span class="percentage">(15%)</span></span></div>
+                            <div class="premi-item"><span><i class="fas fa-dice-five"></i> <span id="cinquina-text">Cinquina</span></span><span class="premi-value" id="cinquinaPrize">-- <span class="percentage">(20%)</span></span></div>
+                            <div class="premi-item"><span><i class="fas fa-crown"></i> <span id="tombola-text">Tombola</span></span><span class="premi-value" id="tombolaPrize">-- <span class="percentage">(45%)</span></span></div>
+                        </div>
+                    </div>
+                    <div class="box-a-container">
+                        <div class="box-a-header"><h2><i class="fas fa-star gold-text"></i> <span id="box-a-title">NUMERO GOLD</span></h2></div>
+                        <div class="box-a-content" id="boxAContent">
+                            <div class="gold-star" id="goldNumberDisplay">?</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="middle-controls">
+                <div class="countdown-container">
+                    <div class="countdown-header"><h2><i class="fas fa-clock"></i> <span id="countdown-title">Countdown</span></h2></div>
+                    <div class="countdown-timer" id="countdown">5s</div>
+                    <div class="time-circles">
+                        <div class="time-circle" data-time="3">3s</div>
+                        <div class="time-circle active" data-time="5">5s</div>
+                        <div class="time-circle" data-time="7">7s</div>
+                        <div class="time-circle" data-time="10">10s</div>
+                    </div>
+                </div>
+                <div class="vertical-controls">
+                    <button class="vertical-btn vertical-start" id="startBtn"><i class="fas fa-play"></i><span id="play-text">Play</span></button>
+                    <button class="vertical-btn vertical-pause" id="pauseBtn" disabled><i class="fas fa-pause"></i><span id="pause-text">Pausa</span></button>
+                    <button class="vertical-btn vertical-extract" id="extractBtn"><i class="fas fa-dice-one"></i><span id="extract-text">Estrai</span></button>
+                    <button class="vertical-btn vertical-clean" id="cleanBtn"><i class="fas fa-trash"></i><span id="reset-text">Reset</span></button>
+                </div>
+                <div class="new-boxes-container">
+                    <div class="vincite-container-large">
+                        <div class="vincite-header-large"><h2><i class="fas fa-trophy"></i> <span id="wins-title">Vincite</span></h2></div>
+                        <div class="vincite-content-large">
+                            <div class="vincite-row">
+                                <div class="vincite-label"><i class="fas fa-star gold-text"></i><span id="win-gold-text">Gold:</span></div>
+                                <div class="vincite-value-large" id="win-gold-value">--</div>
+                                <div class="vincite-count-large" id="win-gold-count">0</div>
+                                <div class="vincite-details" id="win-gold-details-large"></div>
+                            </div>
+                            <div class="vincite-row">
+                                <div class="vincite-label"><i class="fas fa-dice-two"></i><span id="win-ambo-text">Ambo:</span></div>
+                                <div class="vincite-value-large" id="win-ambo-value">--</div>
+                                <div class="vincite-count-large" id="win-ambo-count">0</div>
+                                <div class="vincite-details" id="win-ambo-details-large"></div>
+                            </div>
+                            <div class="vincite-row">
+                                <div class="vincite-label"><i class="fas fa-dice-three"></i><span id="win-terno-text">Terno:</span></div>
+                                <div class="vincite-value-large" id="win-terno-value">--</div>
+                                <div class="vincite-count-large" id="win-terno-count">0</div>
+                                <div class="vincite-details" id="win-terno-details-large"></div>
+                            </div>
+                            <div class="vincite-row">
+                                <div class="vincite-label"><i class="fas fa-dice-four"></i><span id="win-quaterna-text">Quaterna:</span></div>
+                                <div class="vincite-value-large" id="win-quaterna-value">--</div>
+                                <div class="vincite-count-large" id="win-quaterna-count">0</div>
+                                <div class="vincite-details" id="win-quaterna-details-large"></div>
+                            </div>
+                            <div class="vincite-row">
+                                <div class="vincite-label"><i class="fas fa-dice-five"></i><span id="win-cinquina-text">Cinquina:</span></div>
+                                <div class="vincite-value-large" id="win-cinquina-value">--</div>
+                                <div class="vincite-count-large" id="win-cinquina-count">0</div>
+                                <div class="vincite-details" id="win-cinquina-details-large"></div>
+                            </div>
+                            <div class="vincite-row">
+                                <div class="vincite-label"><i class="fas fa-crown"></i><span id="win-tombola-text">Tombola:</span></div>
+                                <div class="vincite-value-large" id="win-tombola-value">--</div>
+                                <div class="vincite-count-large" id="win-tombola-count">0</div>
+                                <div class="vincite-details" id="win-tombola-details-large"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="box-b-container" style="width: 150px; height: 203px;">
+                        <div class="box-b-header"><h2 style="font-size: 8px;"><i class="fas fa-palette"></i> <span id="box-b-title">Display Cartelle Vincenti</span></h2></div>
+                        <div class="box-b-content"><div class="color-controls" id="colorControls"></div></div>
+                    </div>
+                </div>
+            </div>
+            <div class="jackpot-container" id="jackpotContainer">
+                <div class="winning-cartella-wrapper" id="winningCartellaWrapper">
+                    <div class="jackpot-title" id="jackpot-title">Ultima Vincente</div>
+                    <div id="winningCartellaDisplay" style="display: none; width: 100%; height: 100%;"></div>
+                </div>
+                <div class="box-c-container" style="width: 200px; height: 100%; background: var(--unclaimed-pot-bg); border-color: var(--unclaimed-pot-color);">
+                    <div class="box-c-header"><h2 style="font-size: 10px;"><i class="fas fa-piggy-bank"></i> <span id="unclaimed-pot-title">Montepremi Non Vinti</span></h2></div>
+                    <div class="box-c-content">
+                        <div class="unclaimed-pot" id="unclaimedPotDisplay">€ 0.00</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="version-info" id="versionInfo">v.12.3.3 - GOLD EDITION ⭐</div>

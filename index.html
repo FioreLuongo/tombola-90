@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LUONGO Tombola 90 Italia - GOLD EDITION</title>
+  <meta name="description" content="Edizione Gold di lusso per Luongo Tombola 90 Italia con tabellone TV studio, generatore cartelle A4, Intelligenza Estrazioni, Smorfia Napoletana e montepremi." />
+  <meta property="og:title" content="LUONGO Tombola 90 Italia - GOLD EDITION" />
+  <meta property="og:description" content="Edizione Gold di lusso per Luongo Tombola 90 Italia con tabellone TV studio, generatore cartelle A4, Intelligenza Estrazioni, Smorfia Napoletana e montepremi." />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+</head>
+<body class="dark-mode">
+<div class="popup-overlay" id="tombolaPopup">
+    <div class="popup-content">
+        <div style="font-size: 60px; color: var(--success-color); margin-bottom: 15px;"><i class="fas fa-trophy"></i></div>
+        <h2 id="popupTitle">Tombola Completata!</h2>
+        <p id="popupMessage">Tutti i 90 numeri sono stati estratti. Congratulazioni!</p>
+        <button class="popup-close" id="popupClose">OK</button>
+    </div>
+</div>
+<div class="win-popup-overlay" id="winPopup">
+    <div class="win-popup-content">
+        <div style="font-size: 55px; color: var(--warning-color); margin-bottom: 12px;"><i class="fas fa-trophy"></i></div>
+        <div class="win-popup-title" id="winPopupTitle">VINCITA!</div>
+        <div class="win-popup-details" id="winPopupDetails"></div>
+        <div class="win-popup-cartella-id" id="winPopupCartellaId"></div>
+        <div class="win-popup-numbers" id="winPopupNumbers"></div>
+        <div class="win-popup-details" id="winPopupWinners"></div>
+        
+        <!-- AUTO-RESUME BAR & COUNTDOWN (Non ferma il gioco a tempo indeterminato) -->
+        <div class="win-autoresume-box" id="winAutoResumeBox">
+            <div class="win-autoresume-label">
+                <i class="fas fa-sync-alt fa-spin" style="color: #4ade80;"></i> <span id="winAutoResumeText">Ripresa automatica estrazione in <b id="winAutoResumeCountdown">5</b>s</span>
+            </div>
+            <div class="win-autoresume-track">
+                <div class="win-autoresume-fill" id="winAutoResumeBar"></div>
+            </div>
+        </div>
+
+        <div class="win-popup-actions-row">
+            <button class="win-popup-btn win-resume-btn" id="winPopupClose"><i class="fas fa-play"></i> CONTINUA SUBITO</button>
+            <button class="win-popup-btn win-pause-btn" id="winPopupPauseBtn"><i class="fas fa-pause"></i> PAUSA PER VERIFICA</button>
+        </div>
+    </div>
+</div>
+<!-- BANNER VINCITA FLOATING TV (Modalità Flusso Continuo) -->
+<div class="win-floating-banner" id="winFloatingBanner" style="display: none;">
+    <div class="win-banner-badge"><i class="fas fa-trophy"></i></div>
+    <div class="win-banner-body">
+        <div class="win-banner-title" id="winBannerTitle">AMBO REALIZZATO!</div>
+        <div class="win-banner-sub" id="winBannerSub">Cartella TOM001.G1.F001.C15 • € 150.00</div>
+    </div>
+    <button class="win-banner-close-btn" id="winBannerCloseBtn"><i class="fas fa-times"></i></button>
+</div>
+<div class="error-popup-overlay" id="errorPopup">
+    <div class="error-popup-content">
+        <div style="font-size: 60px; color: var(--warning-color); margin-bottom: 15px;"><i class="fas fa-exclamation-triangle"></i></div>
+        <h2 id="errorPopupTitle">Attenzione</h2>
+        <p id="errorPopupMessage"></p>
+        <button class="error-popup-close" id="errorPopupClose">OK</button>
+    </div>
+</div>
+<div class="confirm-popup-overlay" id="confirmPopup" style="display: none;">
+    <div class="confirm-popup-content">
+        <div style="font-size: 55px; color: #f59e0b; margin-bottom: 12px;"><i class="fas fa-question-circle"></i></div>
+        <h2 id="confirmPopupTitle" style="font-size: 20px; font-weight: 800; color: #facc15; margin-bottom: 8px;">Conferma</h2>
+        <p id="confirmPopupMessage" style="font-size: 13px; color: #e2e8f0; margin-bottom: 18px; line-height: 1.4;"></p>
+        <div class="confirm-popup-actions">
+            <button class="confirm-popup-btn cancel" id="confirmPopupCancel">Annulla</button>
+            <button class="confirm-popup-btn confirm" id="confirmPopupOk">Conferma Reset</button>
+        </div>
+    </div>
+</div>
+<!-- MODALE LOGIN AMMINISTRATORE REGIA (PASSWORD PROTETTA CRITTOGRAFICAMENTE) -->
+<div class="admin-login-overlay" id="adminLoginModal" style="display: none;">
+    <div class="admin-login-content">
+        <button class="admin-login-close" id="adminLoginClose"><i class="fas fa-times"></i></button>
+        <div class="admin-login-shield"><i class="fas fa-user-shield"></i></div>
+        <h2 class="admin-login-title">Accesso Riservato Regia</h2>
+        <p class="admin-login-subtitle">Inserisci la password amministratore per sbloccare la console e i comandi live.</p>
+        <div class="admin-pwd-group">
+            <i class="fas fa-lock admin-pwd-icon"></i>
+            <input type="password" id="adminPasswordInput" class="admin-pwd-input" placeholder="Password Amministratore" autocomplete="current-password" />
+            <button type="button" class="admin-pwd-toggle" id="adminTogglePwdVisibility" title="Mostra/Nascondi password"><i class="fas fa-eye" id="adminEyeIcon"></i></button>
+        </div>
+        <div class="admin-login-error" id="adminLoginError" style="display: none;">
+            <i class="fas fa-exclamation-circle"></i> Password errata. Riprova.
+        </div>
+        <div class="admin-login-actions">
+            <button class="admin-login-btn cancel" id="adminLoginCancel">Annulla</button>
+            <button class="admin-login-btn submit" id="adminLoginSubmit"><i class="fas fa-key"></i> Sblocca Regia</button>
+        </div>
+    </div>
+</div>
+<div class="cartelle-section" id="cartelleSection">
+    <div class="cartelle-fixed-header">
+        <div class="cartelle-header">
+            <div class="cartelle-title" id="cartelleTitle">Generatore Cartelle Tombola 90</div>
+            <div class="cartelle-controls">
+                <button class="cartelle-btn cartelle-generate" id="generateCartelle"><i class="fas fa-plus-circle"></i> <span id="generate-text">Genera Cartelle</span></button>
+                <button class="cartelle-btn cartelle-print" id="printCartelleBtn"><i class="fas fa-print"></i> <span>Stampa A4</span></button>
+                <button class="cartelle-btn cartelle-pdf" id="exportPDF"><i class="fas fa-file-pdf"></i> <span id="export-text">Esporta PDF</span></button>
+                <button class="cartelle-btn cartelle-json-export" id="exportJSON"><i class="fas fa-file-export"></i> <span id="export-json-text">Esporta JSON</span></button>
+                <button class="cartelle-btn cartelle-json-import" id="importJSON"><i class="fas fa-file-import"></i> <span id="import-json-text">Importa JSON</span></button>
+                <button class="cartelle-btn cartelle-reset" id="resetCartelle"><i class="fas fa-redo"></i> <span id="reset-cartelle-text">Reset Cartelle</span></button>
+                <button class="cartelle-btn cartelle-close" id="closeCartelle"><i class="fas fa-times"></i> <span id="close-text">Chiudi</span></button>
+            </div>
+        </div>
+        <div class="cartelle-input-group">
+            <div><div class="cartelle-label" id="gameIdLabel">ID Gioco:</div><input type="text" class="cartelle-input" id="gameId" value="TOM001" placeholder="ID Gioco"></div>
+            <div><div class="cartelle-label" id="numGiocatoriLabel">Numero Giocatori:</div><input type="number" class="cartelle-input" id="numGiocatori" min="1" max="20" value="1" placeholder="Giocatori"></div>
+            <div><div class="cartelle-label" id="startSheetLabel">Foglio Iniziale:</div><input type="number" class="cartelle-input" id="startSheet" min="1" max="1000" value="1" placeholder="Foglio Iniziale"></div>
+            <div><div class="cartelle-label" id="participatingGiocatoriLabel">Giocatori Partecipanti:</div><input type="number" class="cartelle-input" id="participatingGiocatori" min="0" max="20" value="0" placeholder="0"></div>
+        </div>
+        <div class="cartelle-stats" id="cartelleStats">
+            <div class="stat-item"><div class="stat-value" id="totalCartelle">0</div><div class="stat-label" id="total-cartelle-label">Cartelle Totali</div></div>
+            <div class="stat-item"><div class="stat-value" id="totalFogli">0</div><div class="stat-label" id="total-fogli-label">Fogli Totali</div></div>
+            <div class="stat-item"><div class="stat-value" id="totalGiocatori">0</div><div class="stat-label" id="total-giocatori-label">Giocatori</div></div>
+            <div class="stat-item"><div class="stat-value" id="totalParticipatingGiocatori">0</div><div class="stat-label" id="total-participating-label">Partecipanti</div></div>
+        </div>
+    </div>
+    <div class="cartelle-scrollable-container" id="cartelleContainer"></div>
+</div>
+<div class="pdf-preview" id="pdfPreview">
+    <div class="pdf-preview-content" id="pdfPreviewContent">
+        <button class="pdf-preview-close" id="closePdfPreview"><i class="fas fa-times"></i></button>
+        <div id="pdfPreviewContainer"></div>
+    </div>
+</div>
+<div class="json-import-overlay" id="jsonImportOverlay">
+    <div class="json-import-content">
+        <button class="json-import-close" id="closeJsonImport"><i class="fas fa-times"></i></button>
+        <h3><i class="fas fa-file-import"></i> <span id="import-json-title">Importa Cartelle da JSON</span></h3>
+        <div class="json-info">
+            <p><strong>Formato JSON atteso:</strong></p>
+            <pre>{"gameId": "TOM001","cartelle":[]}</pre>
+            <p><strong>Opzione alternativa:</strong> Carica un file JSON</p>
+            <input type="file" id="jsonFileUpload" accept=".json" style="margin: 10px 0;">
+        </div>
+        <textarea class="json-textarea" id="jsonImportTextarea" placeholder="Incolla qui il JSON delle cartelle..."></textarea>
+        <button class="json-import-btn" id="confirmJsonImport"><i class="fas fa-check"></i> <span id="confirm-import-text">Importa Cartelle</span></button>
+    </div>
+</div>
+<div class="ai-analysis-panel" id="aiAnalysisPanel">
+    <div class="ai-analysis-header">
+        <div class="ai-analysis-title" id="aiAnalysisTitle">Analisi Intelligenza Estrazioni V12.3.3</div>
+        <button class="ai-analysis-close" id="aiAnalysisClose"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="ai-analysis-content" id="aiAnalysisContent"></div>
+</div>
+<div class="regia-section" id="regiaSection">
+    <div class="regia-fixed-header">
+        <div class="regia-header-left">
+            <div class="regia-live-badge"><span class="live-dot"></span> REGIA LIVE</div>
+            <div class="regia-title">Console Regia & Controllo Gioco</div>
+            <div class="regia-game-tag" id="regiaGameTag">ID: TOM001 • v.15.15.0</div>
+        </div>
+        <div class="regia-header-center">
+            <div class="regia-clock" id="regiaClock">00:00:00</div>
+            <div class="regia-status-badge" id="regiaStatusBadge">Partita Pronta</div>
+        </div>
+        <div class="regia-header-controls">
+            <button class="regia-btn regia-btn-tv" id="regiaSwitchTvBtn"><i class="fas fa-tv"></i> <span>Schermo TV</span></button>
+            <button class="regia-btn regia-btn-cartelle" id="regiaOpenCartelleBtn"><i class="fas fa-ticket-alt"></i> <span>Fogli A4 (4 Colori)</span></button>
+            <button class="regia-btn regia-btn-fullscreen" id="regiaFullscreenBtn" title="Schermo Intero Regia"><i class="fas fa-expand"></i> <span id="regiaFullscreenText">Schermo Intero</span></button>
+            <button class="regia-btn regia-btn-lock" id="regiaLockBtn" title="Blocca console e richiedi password"><i class="fas fa-lock"></i> <span>Blocca Regia</span></button>
+            <button class="regia-btn regia-btn-close" id="regiaCloseBtn"><i class="fas fa-times"></i> <span>Chiudi Regia</span></button>
+        </div>
+    </div>
+    <div class="regia-scrollable-container">
+        <div class="regia-grid">
+            <!-- BOX DEDICATO: MESSA ONLINE & DOWNLOAD GUIDA PDF PASSO-PASSO -->
+            <div class="regia-card regia-deploy-card" id="regiaDeployCard">
+                <div class="regia-card-header">
+                    <h3><i class="fas fa-cloud-upload-alt gold-text"></i> Messa Online Gratis (Render • Cloudflare • Firebase)</h3>
+                    <span class="regia-card-badge online-ready"><i class="fas fa-check-circle"></i> 100% Configurato</span>
+                </div>
+                <div class="regia-deploy-content">
+                    <div class="regia-help-text" style="margin-bottom: 8px;">
+                        Tutto è pronto per pubblicare il tuo gioco gratis su <b>Render</b>, <b>Cloudflare Pages</b> o <b>Firebase Hosting</b> con Database Cloud attivo. Scarica la guida passo-passo o l'archivio ZIP:
+                    </div>
+                    <div class="regia-deploy-actions-grid">
+                        <button type="button" class="regia-deploy-action-btn pdf-btn" id="regiaDownloadGuidePdfBtn" title="Scarica la guida completa passo-passo in formato PDF (100% verificato per Adobe Acrobat Reader)">
+                            <i class="fas fa-file-pdf"></i>
+                            <div class="deploy-btn-text">
+                                <b>Scarica Guida Messa Online (PDF Stampabile)</b>
+                                <span>File binario .PDF garantito al 100% per Adobe Acrobat Reader</span>
+                            </div>
+                        </button>
+                        <button type="button" class="regia-deploy-action-btn view-btn" id="regiaOpenGuideModalBtn" title="Visualizza subito a schermo la guida e stampala in formato A4">
+                            <i class="fas fa-book-open"></i>
+                            <div class="deploy-btn-text">
+                                <b>Leggi a Video & Stampa A4 (Anteprima)</b>
+                                <span>Istruzioni a schermo con stampa rapida (Ctrl+P)</span>
+                            </div>
+                        </button>
+                        <button type="button" class="regia-deploy-action-btn zip-btn" id="regiaDownloadCodeZipBtn" title="Scarica l'intero codice sorgente con tutti i file di configurazione">
+                            <i class="fas fa-file-archive"></i>
+                            <div class="deploy-btn-text">
+                                <b>Scarica Progetto Completo (.ZIP)</b>
+                                <span>Tutti i file di configurazione pronti per GitHub</span>
+                            </div>
+                        </button>
+                    </div>
+                    <div class="regia-deploy-params-pills">
+                        <span class="deploy-pill"><i class="fas fa-key gold-text"></i> Password Regia: <b>tombola90</b></span>
+                        <span class="deploy-pill"><i class="fas fa-database gold-text"></i> Database Firestore: <b>agile-lamp-6xq1s</b></span>
+                        <span class="deploy-pill"><i class="fas fa-file-code" style="color: #38bdf8;"></i> Include: <b>render.yaml</b>, <b>firebase.json</b>, <b>_redirects</b></span>
+                    </div>
+                </div>
+            </div>
+            <div class="regia-card regia-extraction-card">
+                <div class="regia-card-header">
+                    <h3><i class="fas fa-play-circle gold-text"></i> Banco Estrazione & Comandi Live</h3>
+                    <span class="regia-card-badge" id="regiaExtractedStat">0 / 90 Estratti</span>
+                </div>
+                <div class="regia-extraction-content">
+                    <div class="regia-current-number-display">
+                        <div class="regia-number-circle" id="regiaCurrentNumber">--</div>
+                        <div class="regia-smorfia-box">
+                            <div class="regia-smorfia-title">La Smorfia:</div>
+                            <div class="regia-smorfia-text" id="regiaSmorfiaText">In attesa dell'inizio partita</div>
+                        </div>
+                    </div>
+                    <div class="regia-action-bar">
+                        <button class="regia-act-btn regia-start-btn" id="regiaStartBtn"><i class="fas fa-play"></i> Play Automatico</button>
+                        <button class="regia-act-btn regia-pause-btn" id="regiaPauseBtn" disabled><i class="fas fa-pause"></i> Pausa</button>
+                        <button class="regia-act-btn regia-extract-btn" id="regiaExtractBtn"><i class="fas fa-dice"></i> Estrai Singolo</button>
+                        <button class="regia-act-btn regia-reset-btn" id="regiaResetBtn"><i class="fas fa-redo"></i> Reset Gioco</button>
+                    </div>
+                    <div class="regia-timing-control">
+                        <label><i class="fas fa-stopwatch"></i> Intervallo Estrazione:</label>
+                        <div class="regia-time-chips">
+                            <button class="regia-time-chip" data-time="2">2s</button>
+                            <button class="regia-time-chip" data-time="3">3s</button>
+                            <button class="regia-time-chip active" data-time="5">5s</button>
+                            <button class="regia-time-chip" data-time="7">7s</button>
+                            <button class="regia-time-chip" data-time="10">10s</button>
+                        </div>
+                        <span class="regia-current-countdown" id="regiaCountdownDisplay">5s</span>
+                    </div>
+                    <div class="regia-win-mode-control">
+                        <label><i class="fas fa-bolt gold-text"></i> Gestione Vincite:</label>
+                        <select id="regiaWinModeSelect" class="regia-select">
+                            <option value="autoresume_5" selected>Auto-Ripresa 5s (Consigliato)</option>
+                            <option value="autoresume_3">Auto-Ripresa 3s (Rapido)</option>
+                            <option value="autoresume_8">Auto-Ripresa 8s (Relax)</option>
+                            <option value="banner_live">Banner TV (Non ferma)</option>
+                            <option value="manual">Manuale (Attesa Admin)</option>
+                        </select>
+                    </div>
+                    <div class="regia-audio-options">
+                        <button class="regia-toggle-btn active" id="regiaVoiceBtn"><i class="fas fa-volume-up"></i> Voce: <b id="regiaVoiceState">ON</b></button>
+                        <button class="regia-toggle-btn active" id="regiaAiBtn"><i class="fas fa-brain"></i> AI Estrazioni: <b id="regiaAiState">ON</b></button>
+                        <button class="regia-toggle-btn" id="regiaTestVoiceBtn"><i class="fas fa-bullhorn"></i> Test Voce</button>
+                    </div>
+                </div>
+            </div>
+            <div class="regia-card regia-prizes-card">
+                <div class="regia-card-header">
+                    <h3><i class="fas fa-coins gold-text"></i> Gestione Montepremi & Cassa</h3>
+                </div>
+                <div class="regia-prizes-content">
+                    <div class="regia-prize-input-row">
+                        <label>Montepremi Totale:</label>
+                        <input type="number" id="regiaPrizePoolInput" min="0" value="0" class="regia-input" />
+                        <select id="regiaCurrencySelect" class="regia-select">
+                            <option value="€">€</option>
+                            <option value="£">£</option>
+                            <option value="$">$</option>
+                        </select>
+                        <button class="regia-btn-sm" id="regiaApplyPrizeBtn">Imposta</button>
+                    </div>
+                    <div class="regia-prizes-grid">
+                        <div class="regia-prize-row gold-prize">
+                            <span>⭐ Numero Gold (5%)</span>
+                            <b id="regiaGoldPrize">--</b>
+                        </div>
+                        <div class="regia-prize-row">
+                            <span>⚁ Ambo (5%)</span>
+                            <b id="regiaAmboPrize">--</b>
+                        </div>
+                        <div class="regia-prize-row">
+                            <span>⚂ Terno (10%)</span>
+                            <b id="regiaTernoPrize">--</b>
+                        </div>
+                        <div class="regia-prize-row">
+                            <span>⚃ Quaterna (15%)</span>
+                            <b id="regiaQuaternaPrize">--</b>
+                        </div>
+                        <div class="regia-prize-row">
+                            <span>⚄ Cinquina (20%)</span>
+                            <b id="regiaCinquinaPrize">--</b>
+                        </div>
+                        <div class="regia-prize-row tombola-prize">
+                            <span>👑 Tombola (45%)</span>
+                            <b id="regiaTombolaPrize">--</b>
+                        </div>
+                    </div>
+                    <div class="regia-cloud-bank-card" id="regiaCloudBankCard">
+                        <div class="regia-cloud-header">
+                            <div class="regia-cloud-title">
+                                <i class="fas fa-database gold-text"></i>
+                                <span>Cassa Cloud Montepremi Non Vinti</span>
+                            </div>
+                            <span class="regia-cloud-status" id="regiaCloudStatus">
+                                <span class="cloud-dot online"></span> Inizializzazione...
+                            </span>
+                        </div>
+
+                        <!-- Non Vinti della Partita Attuale -->
+                        <div class="regia-current-unclaimed-row">
+                            <div class="unclaimed-meta">
+                                <span class="unclaimed-tag"><i class="fas fa-coins gold-text"></i> Non Vinti Partita Attuale:</span>
+                                <span class="unclaimed-num gold-text" id="regiaUnclaimedVal">€ 0.00</span>
+                            </div>
+                            <div class="unclaimed-btn-group">
+                                <button type="button" class="regia-cloud-btn save-btn" id="regiaSaveToCloudBtn" title="Salva i premi non vinti di questa partita nel Database Cloud">
+                                    <i class="fas fa-cloud-upload-alt"></i> Salva in Cloud
+                                </button>
+                                <button type="button" class="regia-cloud-btn local-reset-btn" id="regiaResetUnclaimedBtn" title="Azzera solo i non vinti della partita corrente">
+                                    <i class="fas fa-undo"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Saldo Totale Salvato nel Database Cloud da Partite Precedenti -->
+                        <div class="regia-cloud-balance-box">
+                            <div class="balance-info">
+                                <div class="balance-label"><i class="fas fa-vault gold-text"></i> Totale Salvato nel Database:</div>
+                                <div class="balance-value gold-text" id="regiaCloudBalance">€ 0.00</div>
+                                <div class="balance-meta">Ultimo agg.: <span id="regiaCloudLastUpdated">--</span></div>
+                            </div>
+                            <button type="button" class="regia-cloud-btn recall-btn" id="regiaRecallFromCloudBtn" title="Richiama il totale salvato e aggiungilo al montepremi della partita attuale">
+                                <i class="fas fa-cloud-download-alt"></i> Richiama nel Montepremi
+                            </button>
+                        </div>
+
+                        <!-- Strumenti secondari & Auto-salva -->
+                        <div class="regia-cloud-tools-row">
+                            <label class="regia-checkbox-label" title="Salva automaticamente il montepremi residuo quando la partita termina o viene resettata">
+                                <input type="checkbox" id="regiaAutoSaveCloudToggle" checked />
+                                <span>Auto-salva a fine partita / reset</span>
+                            </label>
+                            <div class="regia-mini-btn-group">
+                                <button type="button" class="regia-btn-xs" id="regiaSyncCloudBtn" title="Sincronizza con Firebase Firestore"><i class="fas fa-sync-alt"></i> Sincronizza</button>
+                                <button type="button" class="regia-btn-xs danger" id="regiaResetCloudBtn" title="Azzera Cassa Cloud nel Database"><i class="fas fa-trash-alt"></i> Azzera Database</button>
+                            </div>
+                        </div>
+
+                        <!-- Storico Movimenti Cassa -->
+                        <div class="regia-cloud-history" id="regiaCloudHistory">
+                            <div class="history-title"><i class="fas fa-history"></i> Ultimi Movimenti Database:</div>
+                            <div class="history-list" id="regiaCloudHistoryList">
+                                <div class="history-empty">Connessione al database...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="regia-card regia-colors-card">
+                <div class="regia-card-header">
+                    <h3><i class="fas fa-palette gold-text"></i> Colori Cartelle (Foglio A4)</h3>
+                    <span class="regia-card-badge" id="regiaActiveColorsBadge">0 Colori Attivi</span>
+                </div>
+                <div class="regia-colors-content">
+                    <div class="regia-help-text" style="margin-bottom: 8px;">
+                        Tutti i colori sono <b>disattivati</b>. L'amministratore attiva manualmente quale colore è in gioco.
+                    </div>
+                    <div class="regia-color-item blue-item">
+                        <div class="color-head"><span class="color-indicator blue"></span><b>Cartelle BLU</b></div>
+                        <span class="color-count" id="regiaBlueCount">0 cartelle (DISATTIVO)</span>
+                        <label class="switch"><input type="checkbox" id="regiaToggleBlue"><span class="slider"></span></label>
+                    </div>
+                    <div class="regia-color-item orange-item">
+                        <div class="color-head"><span class="color-indicator orange"></span><b>Cartelle ARANCIO</b></div>
+                        <span class="color-count" id="regiaOrangeCount">0 cartelle (DISATTIVO)</span>
+                        <label class="switch"><input type="checkbox" id="regiaToggleOrange"><span class="slider"></span></label>
+                    </div>
+                    <div class="regia-color-item green-item">
+                        <div class="color-head"><span class="color-indicator green"></span><b>Cartelle VERDE</b></div>
+                        <span class="color-count" id="regiaGreenCount">0 cartelle (DISATTIVO)</span>
+                        <label class="switch"><input type="checkbox" id="regiaToggleGreen"><span class="slider"></span></label>
+                    </div>
+                    <div class="regia-color-item yellow-item">
+                        <div class="color-head"><span class="color-indicator yellow"></span><b>Cartelle GIALLA</b></div>
+                        <span class="color-count" id="regiaYellowCount">0 cartelle (DISATTIVO)</span>
+                        <label class="switch"><input type="checkbox" id="regiaToggleYellow"><span class="slider"></span></label>
+                    </div>
+                    <div class="regia-generator-shortcuts">
+                        <button type="button" class="regia-btn-full primary-action" id="regiaQuickGenerateBtn"><i class="fas fa-magic"></i> Genera Fogli A4 (4 Colori)</button>
+                        <button type="button" class="regia-btn-full outline" id="regiaQuickPrintBtn"><i class="fas fa-print"></i> Stampa Cartelle A4</button>
+                    </div>
+                </div>
+            </div>
+            <div class="regia-card regia-difficulty-card">
+                <div class="regia-card-header">
+                    <h3><i class="fas fa-shield-alt gold-text"></i> Algoritmo Difficoltà Vincite (Anti-Vincita)</h3>
+                    <span class="regia-card-badge" id="regiaDifficultyBadge">ALTA</span>
+                </div>
+                <div class="regia-difficulty-content">
+                    <div class="regia-difficulty-toggle-row">
+                        <div>
+                            <b>Controllo Matematico Vincite:</b>
+                            <div class="regia-subtext">Calcola le cartelle generate e ritarda l'estrazione di numeri che chiuderebbero combinazioni.</div>
+                        </div>
+                        <label class="switch"><input type="checkbox" id="regiaDifficultyMasterToggle" checked><span class="slider"></span></label>
+                    </div>
+                    <div class="regia-difficulty-mode-row">
+                        <label>Profilo Difficoltà:</label>
+                        <select id="regiaDifficultyLevelSelect" class="regia-select">
+                            <option value="high" selected>Massima Difficoltà (Anti-Vincita Aggressiva)</option>
+                            <option value="medium">Medio (Distribuzione Spalmata tra Cartelle)</option>
+                            <option value="normal">Standard (Intelligenza Bilanciata)</option>
+                            <option value="random">Casuale Puro (Nessun Filtro)</option>
+                        </select>
+                    </div>
+                    <div class="regia-forced-delays-box">
+                        <div class="regia-forced-title"><i class="fas fa-lock"></i> Ritardo Minimo Forzato (Blocca vincita prima di):</div>
+                        <div class="forced-delay-grid">
+                            <div class="forced-delay-item">
+                                <span>Min Ambo:</span>
+                                <input type="number" id="forcedMinAmbo" min="2" max="30" value="15" class="regia-micro-input" /> estr.
+                            </div>
+                            <div class="forced-delay-item">
+                                <span>Min Terno:</span>
+                                <input type="number" id="forcedMinTerno" min="3" max="50" value="28" class="regia-micro-input" /> estr.
+                            </div>
+                            <div class="forced-delay-item">
+                                <span>Min Quaterna:</span>
+                                <input type="number" id="forcedMinQuaterna" min="4" max="65" value="42" class="regia-micro-input" /> estr.
+                            </div>
+                            <div class="forced-delay-item">
+                                <span>Min Cinquina:</span>
+                                <input type="number" id="forcedMinCinquina" min="5" max="80" value="58" class="regia-micro-input" /> estr.
+                            </div>
+                            <div class="forced-delay-item forced-delay-tombola">
+                                <span><i class="fas fa-crown gold-text"></i> Min Tombola:</span>
+                                <input type="number" id="forcedMinTombola" min="10" max="90" value="75" class="regia-micro-input" /> estr.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="regia-algo-monitor">
+                        <div class="algo-stat-item">
+                            <span class="stat-lbl">Cartelle Sorvegliate:</span>
+                            <b class="stat-val" id="regiaMonitoredCards">0</b>
+                        </div>
+                        <div class="algo-stat-item">
+                            <span class="stat-lbl">Numeri Trattenuti Anti-Vincita:</span>
+                            <b class="stat-val danger" id="regiaBlockedNumbersCount">0</b>
+                        </div>
+                        <div class="algo-stat-item">
+                            <span class="stat-lbl">Indice Difficoltà Stimato:</span>
+                            <b class="stat-val gold" id="regiaDifficultyIndex">88% (Molto Alto)</b>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="regia-card regia-delays-card">
+                <div class="regia-card-header">
+                    <h3><i class="fas fa-hourglass-half gold-text"></i> Scadenza Premi & Cassa Non Vinti</h3>
+                    <span class="regia-card-badge" id="regiaDelaysActiveBadge">Scadenze Attive</span>
+                </div>
+                <div class="regia-delays-content">
+                    <div class="regia-help-text">
+                        Imposta il numero massimo di estrazioni consentite per ogni vincita. Se la combinazione non si realizza entro la soglia, il premio scade e va nel <b>Montepremi Non Vinti</b>.
+                    </div>
+                    <div class="regia-delay-rows">
+                        <div class="regia-delay-row" data-prize="gold">
+                            <div class="delay-row-header">
+                                <span class="delay-prize-name"><i class="fas fa-star" style="color: #facc15;"></i> Numero Gold (5%)</span>
+                                <span class="delay-status-badge" id="delayStatusGold">Entro 25 estr.</span>
+                            </div>
+                            <div class="delay-input-group">
+                                <label>Max Estr.:</label>
+                                <input type="number" id="delayInputGold" min="5" max="90" value="25" class="regia-num-input" />
+                                <span class="delay-progress" id="delayProgressGold">0 / 25</span>
+                            </div>
+                        </div>
+                        <div class="regia-delay-row" data-prize="ambo">
+                            <div class="delay-row-header">
+                                <span class="delay-prize-name"><i class="fas fa-dice-two" style="color: #38bdf8;"></i> Ambo (5%)</span>
+                                <span class="delay-status-badge" id="delayStatusAmbo">Entro 20 estr.</span>
+                            </div>
+                            <div class="delay-input-group">
+                                <label>Max Estr.:</label>
+                                <input type="number" id="delayInputAmbo" min="5" max="90" value="20" class="regia-num-input" />
+                                <span class="delay-progress" id="delayProgressAmbo">0 / 20</span>
+                            </div>
+                        </div>
+                        <div class="regia-delay-row" data-prize="terno">
+                            <div class="delay-row-header">
+                                <span class="delay-prize-name"><i class="fas fa-dice-three" style="color: #4ade80;"></i> Terno (10%)</span>
+                                <span class="delay-status-badge" id="delayStatusTerno">Entro 35 estr.</span>
+                            </div>
+                            <div class="delay-input-group">
+                                <label>Max Estr.:</label>
+                                <input type="number" id="delayInputTerno" min="5" max="90" value="35" class="regia-num-input" />
+                                <span class="delay-progress" id="delayProgressTerno">0 / 35</span>
+                            </div>
+                        </div>
+                        <div class="regia-delay-row" data-prize="quaterna">
+                            <div class="delay-row-header">
+                                <span class="delay-prize-name"><i class="fas fa-dice-four" style="color: #fb923c;"></i> Quaterna (15%)</span>
+                                <span class="delay-status-badge" id="delayStatusQuaterna">Entro 50 estr.</span>
+                            </div>
+                            <div class="delay-input-group">
+                                <label>Max Estr.:</label>
+                                <input type="number" id="delayInputQuaterna" min="5" max="90" value="50" class="regia-num-input" />
+                                <span class="delay-progress" id="delayProgressQuaterna">0 / 50</span>
+                            </div>
+                        </div>
+                        <div class="regia-delay-row" data-prize="cinquina">
+                            <div class="delay-row-header">
+                                <span class="delay-prize-name"><i class="fas fa-dice-five" style="color: #f472b6;"></i> Cinquina (20%)</span>
+                                <span class="delay-status-badge" id="delayStatusCinquina">Entro 65 estr.</span>
+                            </div>
+                            <div class="delay-input-group">
+                                <label>Max Estr.:</label>
+                                <input type="number" id="delayInputCinquina" min="5" max="90" value="65" class="regia-num-input" />
+                                <span class="delay-progress" id="delayProgressCinquina">0 / 65</span>
+                            </div>
+                        </div>
+                        <div class="regia-delay-row" data-prize="tombola">
+                            <div class="delay-row-header">
+                                <span class="delay-prize-name"><i class="fas fa-crown" style="color: #f59e0b;"></i> Tombola (45%)</span>
+                                <span class="delay-status-badge" id="delayStatusTombola">Entro 85 estr.</span>
+                            </div>
+                            <div class="delay-input-group">
+                                <label>Max Estr.:</label>
+                                <input type="number" id="delayInputTombola" min="15" max="90" value="85" class="regia-num-input" />
+                                <span class="delay-progress" id="delayProgressTombola">0 / 85</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="regia-delay-actions">
+                        <button class="regia-btn-sm" id="regiaApplyDelaysBtn"><i class="fas fa-check"></i> Applica Soglie</button>
+                        <button class="regia-btn-sm danger" id="regiaResetDelaysBtn"><i class="fas fa-undo"></i> Reset Default</button>
+                    </div>
+                </div>
+            </div>
+            <div class="regia-card regia-board-card">
+                <div class="regia-card-header">
+                    <h3><i class="fas fa-th gold-text"></i> Mini-Tabellone di Monitoraggio (90 Numeri)</h3>
+                    <span class="regia-card-badge" id="regiaBoardStatus">90 Rimanenti</span>
+                </div>
+                <div class="regia-board-grid" id="regiaBoardGrid"></div>
+            </div>
+            <div class="regia-card regia-graphics-card">
+                <div class="regia-card-header">
+                    <h3><i class="fas fa-photo-video gold-text"></i> Gestione Loghi & Grafiche TV Live</h3>
+                    <span class="regia-card-badge" id="regiaTvGraphicBadge">TV Disattivo</span>
+                </div>
+                <div class="regia-graphics-content">
+                    <div class="regia-graphic-preview-container">
+                        <div class="regia-graphic-preview-tv-frame">
+                            <div class="regia-tv-frame-tag"><i class="fas fa-tv"></i> SCHERMO TV PREVIEW</div>
+                            <div class="regia-preview-img-wrapper" id="regiaPreviewImgWrapper">
+                                <img id="regiaTvGraphicPreview" src="/assets/aistudio/image_5b55ca57.png" alt="Preview Grafica" />
+                            </div>
+                            <div class="regia-preview-placeholder" id="regiaGraphicPlaceholder" style="display: none;">
+                                <i class="fas fa-image fa-2x"></i>
+                                <span>Nessuna grafica attiva</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="regia-graphic-controls-row">
+                        <div class="regia-switch-wrapper">
+                            <span class="switch-title"><i class="fas fa-broadcast-tower gold-text"></i> Trasmetti su Schermo TV:</span>
+                            <label class="switch"><input type="checkbox" id="regiaTvGraphicToggle"><span class="slider"></span></label>
+                        </div>
+                    </div>
+
+                    <div class="regia-graphic-actions-row">
+                        <input type="file" id="regiaGraphicFileInput" accept="image/*" style="display: none;" />
+                        <button type="button" class="regia-act-btn regia-upload-btn" id="regiaUploadGraphicBtn">
+                            <i class="fas fa-cloud-upload-alt"></i> Carica Tua Immagine
+                        </button>
+                        <button type="button" class="regia-act-btn regia-clear-graphic-btn" id="regiaClearGraphicBtn">
+                            <i class="fas fa-trash-alt"></i> Disattiva
+                        </button>
+                    </div>
+
+                    <div class="regia-graphic-presets-section">
+                        <div class="regia-preset-title"><i class="fas fa-th-large"></i> Grafiche Rapide / Preset:</div>
+                        <div class="regia-preset-chips">
+                            <button type="button" class="regia-preset-chip active" id="presetUserScreenshotBtn" data-preset="screenshot">
+                                <i class="fas fa-desktop"></i> Screenshot Controlli
+                            </button>
+                            <button type="button" class="regia-preset-chip" id="presetGoldLogoBtn" data-preset="gold">
+                                <i class="fas fa-crown"></i> Logo Gold 24K
+                            </button>
+                            <button type="button" class="regia-preset-chip" id="presetSponsorBtn" data-preset="sponsor">
+                                <i class="fas fa-award"></i> Badge Sponsor VIP
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="regia-graphic-settings-grid">
+                        <div class="regia-setting-field">
+                            <label><i class="fas fa-map-marker-alt"></i> Posizione su TV:</label>
+                            <select id="regiaTvGraphicPositionSelect" class="regia-select">
+                                <option value="header_box1" selected>Header Box 1 (Accanto al Titolo)</option>
+                                <option value="watermark_br">Watermark TV (In Basso a Destra)</option>
+                                <option value="watermark_tr">Watermark TV (In Alto a Destra)</option>
+                                <option value="floating_banner">Banner Flottante (Centro)</option>
+                            </select>
+                        </div>
+
+                        <div class="regia-setting-field">
+                            <label><i class="fas fa-expand-arrows-alt"></i> Dimensione: <span id="regiaGraphicScaleVal">100%</span></label>
+                            <input type="range" id="regiaGraphicScale" min="50" max="150" value="100" class="regia-slider" />
+                        </div>
+
+                        <div class="regia-setting-field">
+                            <label><i class="fas fa-adjust"></i> Opacità: <span id="regiaGraphicOpacityVal">100%</span></label>
+                            <input type="range" id="regiaGraphicOpacity" min="20" max="100" value="100" class="regia-slider" />
+                        </div>
+
+                        <div class="regia-setting-field">
+                            <label><i class="fas fa-border-style"></i> Bordo / Stile:</label>
+                            <select id="regiaTvGraphicBorderSelect" class="regia-select">
+                                <option value="gold" selected>Cornice Oro 24K & Glow</option>
+                                <option value="cyan">Neon Cyan Glow</option>
+                                <option value="clean">Trasparente / Senza Bordo</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="regia-card regia-wins-card regia-combined-wins-log-card">
+                <div class="regia-card-header">
+                    <h3><i class="fas fa-trophy gold-text"></i> Monitor Vincite & Registro Eventi</h3>
+                    <div class="regia-wins-log-header-controls">
+                        <div class="regia-subnav-pills">
+                            <button type="button" class="regia-pill-btn active" id="regiaTabSplitBtn" title="Mostra entrambi affiancati"><i class="fas fa-columns"></i> Entrambi</button>
+                            <button type="button" class="regia-pill-btn" id="regiaTabWinsBtn" title="Mostra solo monitor vincite"><i class="fas fa-trophy"></i> Vincite <span class="regia-card-badge" id="regiaTotalWinsBadge">0</span></button>
+                            <button type="button" class="regia-pill-btn" id="regiaTabLogBtn" title="Mostra solo registro eventi"><i class="fas fa-terminal"></i> Log Eventi</button>
+                        </div>
+                        <button type="button" class="regia-btn-sm" id="regiaClearLogBtn" title="Pulisci log eventi"><i class="fas fa-trash-alt"></i> Pulisci Log</button>
+                    </div>
+                </div>
+                <div class="regia-combined-content mode-split" id="regiaCombinedContent">
+                    <div class="regia-combined-pane pane-wins" id="regiaPaneWins">
+                        <div class="regia-pane-title"><i class="fas fa-award gold-text"></i> Vincite Realizzate in Diretta:</div>
+                        <div class="regia-wins-content" id="regiaWinsContent">
+                            <div class="regia-empty-state">In attesa delle prime vincite...</div>
+                        </div>
+                    </div>
+                    <div class="regia-combined-pane pane-log" id="regiaPaneLog">
+                        <div class="regia-pane-title"><i class="fas fa-stream gold-text"></i> Registro Attività Live:</div>
+                        <div class="regia-log-content" id="regiaLogContent">
+                            <div class="log-entry info"><span class="log-time">LIVE</span> Regia Broadcast inizializzata. Sistema pronto.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="tv-graphic-overlay watermark-br" id="tvGraphicOverlay" style="display: none;">
+    <div class="tv-graphic-inner" id="tvGraphicInner">
+        <img id="tvGraphicOverlayImg" src="/assets/aistudio/image_5b55ca57.png" alt="TV Graphic Live" />
+        <div class="tv-graphic-live-badge"><span class="live-dot-mini"></span> LIVE</div>
+    </div>
+</div>
+<header>
+    <div class="custom-title-box">
+        <span class="box-id-badge">1</span>
+        <div class="header-tv-graphic-slot" id="headerTvGraphicSlot" style="display: none;">
+            <img id="headerTvGraphicImg" src="/assets/aistudio/image_5b55ca57.png" alt="Logo Regia" />
+        </div>
+        <span id="mainTitleText">Luongo Tombola 90 Italia - GOLD EDITION</span>
+        <div class="dice-container"><i class="fas fa-dice dice-1"></i><i class="fas fa-dice dice-2"></i></div>
+    </div>
+    <div class="clock">
+        <span class="box-id-badge">2</span>
+        <div class="clock-unit"><span class="clock-value" id="hours">00</span><span class="clock-label" id="hours-label">Hours</span></div>
+        <div class="clock-unit"><span class="clock-value" id="minutes">00</span><span class="clock-label" id="minutes-label">Minutes</span></div>
+        <div class="clock-unit"><span class="clock-value" id="seconds">00</span><span class="clock-label" id="seconds-label">Seconds</span></div>
+    </div>
+</header>
+<nav>
+    <span class="box-id-badge">3</span>
+    <div class="nav-links">
+        <a href="#" id="navHomeLink"><i class="fas fa-home"></i> <span id="nav-home">Home</span></a>
+        <a href="#" id="navCartelleLink"><i class="fas fa-ticket-alt"></i> <span id="nav-cards">Cartelle</span></a>
+        <a href="#" id="navRegiaLink" class="nav-regia-btn"><i class="fas fa-sliders-h"></i> <span id="nav-regia">Regia</span></a>
+        <a href="#" id="tombolaItalia" class="tombola-option"><i class="fas fa-flag"></i> <span id="tombola-italia-text">Tombola Italia</span></a>
+    </div>
+    <div class="nav-options">
+        <div class="nav-extra-buttons">
+            <button class="nav-btn" id="fullscreenBtn"><i class="fas fa-tv"></i> <span id="tv-mode-text">Modalità TV</span></button>
+            <button class="nav-btn" id="voiceControlBtn"><i class="fas fa-volume-up"></i> <span id="voice-text">Voce</span></button>
+            <button class="nav-btn ai-toggle active" id="aiIntelligenceBtn"><i class="fas fa-brain"></i> <span id="ai-intelligence-text">Intelligenza Estrazioni</span></button>
+        </div>
+        <button class="audio-toggle" id="audioToggle"><i class="fas fa-volume-up"></i> <span id="audio-text">Audio ON</span></button>
+        <div class="language-toggle"><span id="lang-it">IT</span><label class="switch"><input type="checkbox" id="languageSwitch"><span class="slider"></span></label><span id="lang-en">EN</span></div>
+        <div class="theme-toggle"><span id="theme-light">Light</span><label class="switch"><input type="checkbox" id="themeSwitch" checked><span class="slider"></span></label><span id="theme-dark">Dark</span></div>
+    </div>
+</nav>
+<div class="main-container">
+    <div class="main-layout">
+        <div class="board-container"><span class="box-id-badge">4</span><div class="board" id="board"></div></div>
+        <div class="controls-section">
+            <div class="top-controls">
+                <div class="card card-extracted">
+                    <span class="box-id-badge">5</span>
+                    <h2><i class="fas fa-star"></i> <span id="extracted-number-title">Numero Estratto</span></h2>
+                    <div class="current-number" id="currentNumber">--</div>
+                    <div class="smorfia-meaning" id="smorfiaMeaning">
+                        <span class="smorfia-label" id="smorfiaLabel">La Smorfia:</span>
+                        <span class="smorfia-text" id="smorfiaText">--</span>
+                    </div>
+                    <div class="progress-container"><div class="progress-bar" id="extractionProgress"></div></div>
+                    <div class="extraction-stats" id="extractionStats">
+                        <div class="stat-item"><i class="fas fa-check-circle stat-icon" style="color: var(--success-color);"></i><span id="extracted-label">Estratti:</span><span class="stat-value" id="extractedCount">0</span></div>
+                        <div class="stat-item"><i class="fas fa-clock stat-icon" style="color: var(--warning-color);"></i><span id="remaining-label">Rimanenti:</span><span class="stat-value" id="remainingCount">90</span></div>
+                    </div>
+                    <div style="font-size: 11px; margin-top: 2px;"><span id="progress-label">Progresso:</span> <span id="progressText">0%</span></div>
+                </div>
+                <div class="card card-last-numbers">
+                    <span class="box-id-badge">6</span>
+                    <h2><i class="fas fa-history"></i> <span id="last-numbers-title">Ultimi 5</span></h2>
+                    <div class="last-numbers-container-vertical" id="lastNumbersContainer">
+                        <div class="last-number-vertical">--</div><div class="last-number-vertical">--</div><div class="last-number-vertical">--</div><div class="last-number-vertical">--</div><div class="last-number-vertical">--</div>
+                    </div>
+                </div>
+                <div class="right-column">
+                    <div class="montepremi-container">
+                        <span class="box-id-badge">7</span>
+                        
+                        <!-- SEZIONE 1: Montepremi & Quote Premi -->
+                        <div class="montepremi-section montepremi-prizes-card">
+                            <div class="montepremi-header"><h2><i class="fas fa-coins gold-text"></i> <span id="prize-pool-title">Montepremi</span></h2></div>
+                            <div class="montepremi-input-container">
+                                <input type="number" class="montepremi-input" id="prizePool" placeholder="Somma totale" min="0" value="0">
+                                <select class="currency-select" id="currencySelect"><option value="€">€</option><option value="£">£</option><option value="$">$</option></select>
+                            </div>
+                            <div class="premi-list">
+                                <div class="premi-item"><span><i class="fas fa-star gold-text"></i> <span id="gold-text">Numero Gold</span></span><span class="premi-value" id="goldPrize">-- <span class="percentage">(5%)</span></span></div>
+                                <div class="premi-item"><span><i class="fas fa-dice-two"></i> <span id="ambo-text">Ambo</span></span><span class="premi-value" id="amboPrize">-- <span class="percentage">(5%)</span></span></div>
+                                <div class="premi-item"><span><i class="fas fa-dice-three"></i> <span id="terno-text">Terno</span></span><span class="premi-value" id="ternoPrize">-- <span class="percentage">(10%)</span></span></div>
+                                <div class="premi-item"><span><i class="fas fa-dice-four"></i> <span id="quaterna-text">Quaterna</span></span><span class="premi-value" id="quaternaPrize">-- <span class="percentage">(15%)</span></span></div>
+                                <div class="premi-item"><span><i class="fas fa-dice-five"></i> <span id="cinquina-text">Cinquina</span></span><span class="premi-value" id="cinquinaPrize">-- <span class="percentage">(20%)</span></span></div>
+                                <div class="premi-item"><span><i class="fas fa-crown"></i> <span id="tombola-text">Tombola</span></span><span class="premi-value" id="tombolaPrize">-- <span class="percentage">(45%)</span></span></div>
+                            </div>
+                        </div>
+
+                        <!-- SEZIONE 2: Montepremi Non Vinti / Vinti -->
+                        <div class="montepremi-section montepremi-unclaimed-card">
+                            <div class="montepremi-unclaimed-strip">
+                                <span class="unclaimed-strip-label"><i class="fas fa-piggy-bank gold-text"></i> <span id="unclaimed-pot-title">Montepremi Non Vinti</span>:</span>
+                                <span class="unclaimed-strip-value" id="unclaimedPotDisplay">€ 0.00</span>
+                            </div>
+                            <div class="tv-rollover-badge" id="tvRolloverBadge" style="display: none;">
+                                <i class="fas fa-database gold-text"></i> <span id="tvRolloverText">Include € 0.00 da partite precedenti</span>
+                            </div>
+                        </div>
+
+                        <!-- SEZIONE 3: Colore Cartelle -->
+                        <div class="montepremi-section montepremi-colors-card">
+                            <div class="montepremi-colors-wrapper">
+                                <div class="montepremi-colors-head"><i class="fas fa-palette gold-text"></i> <span>Colore Cartelle</span></div>
+                                <div class="color-controls" id="colorControls"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="box-a-container" style="display: none !important;">
+                        <div class="box-a-header"><h2><i class="fas fa-star gold-text"></i> <span id="box-a-title">NUMERO GOLD</span></h2></div>
+                        <div class="box-a-content" id="boxAContent">
+                            <div class="gold-star" id="goldNumberDisplay">?</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="bottom-controls">
+                <div class="bottom-left-column">
+                    <div class="vincite-container-large">
+                        <span class="box-id-badge">10</span>
+                        <div class="vincite-header-large"><h2><i class="fas fa-trophy"></i> <span id="wins-title">Vincite</span></h2></div>
+                        <div class="vincite-content-large">
+                            <div class="vincite-row">
+                                <div class="vincite-label"><i class="fas fa-star gold-text"></i><span id="win-gold-text">Gold:</span></div>
+                                <div class="vincite-value-large" id="win-gold-value">--</div>
+                                <div class="vincite-count-large" id="win-gold-count">0</div>
+                                <div class="vincite-details" id="win-gold-details-large"></div>
+                            </div>
+                            <div class="vincite-row">
+                                <div class="vincite-label"><i class="fas fa-dice-two"></i><span id="win-ambo-text">Ambo:</span></div>
+                                <div class="vincite-value-large" id="win-ambo-value">--</div>
+                                <div class="vincite-count-large" id="win-ambo-count">0</div>
+                                <div class="vincite-details" id="win-ambo-details-large"></div>
+                            </div>
+                            <div class="vincite-row">
+                                <div class="vincite-label"><i class="fas fa-dice-three"></i><span id="win-terno-text">Terno:</span></div>
+                                <div class="vincite-value-large" id="win-terno-value">--</div>
+                                <div class="vincite-count-large" id="win-terno-count">0</div>
+                                <div class="vincite-details" id="win-terno-details-large"></div>
+                            </div>
+                            <div class="vincite-row">
+                                <div class="vincite-label"><i class="fas fa-dice-four"></i><span id="win-quaterna-text">Quaterna:</span></div>
+                                <div class="vincite-value-large" id="win-quaterna-value">--</div>
+                                <div class="vincite-count-large" id="win-quaterna-count">0</div>
+                                <div class="vincite-details" id="win-quaterna-details-large"></div>
+                            </div>
+                            <div class="vincite-row">
+                                <div class="vincite-label"><i class="fas fa-dice-five"></i><span id="win-cinquina-text">Cinquina:</span></div>
+                                <div class="vincite-value-large" id="win-cinquina-value">--</div>
+                                <div class="vincite-count-large" id="win-cinquina-count">0</div>
+                                <div class="vincite-details" id="win-cinquina-details-large"></div>
+                            </div>
+                            <div class="vincite-row">
+                                <div class="vincite-label"><i class="fas fa-crown"></i><span id="win-tombola-text">Tombola:</span></div>
+                                <div class="vincite-value-large" id="win-tombola-value">--</div>
+                                <div class="vincite-count-large" id="win-tombola-count">0</div>
+                                <div class="vincite-details" id="win-tombola-details-large"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="jackpot-container" id="jackpotContainer">
+                        <span class="box-id-badge">11</span>
+                        <div class="winning-cartella-wrapper" id="winningCartellaWrapper" style="width: 100%; height: 100%;">
+                            <div class="jackpot-title" id="jackpot-title">Ultima Vincente</div>
+                            <div id="winningCartellaDisplay" style="display: none; width: 100%; height: 100%;"></div>
+                        </div>
+                        <div class="version-info" id="versionInfo">v.15.15.0</div>
+                        <div class="box-c-container" style="display: none !important;">
+                            <div class="box-c-header"><h2 style="font-size: 10px;"><i class="fas fa-piggy-bank"></i> <span>Montepremi Non Vinti</span></h2></div>
+                            <div class="box-c-content">
+                                <div class="unclaimed-pot" id="unclaimedPotDisplayOld">€ 0.00</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="bottom-right-column">
+                    <div class="countdown-container">
+                        <span class="box-id-badge">8</span>
+                        <div class="countdown-header"><h2><i class="fas fa-clock"></i> <span id="countdown-title">Countdown</span></h2></div>
+                        <div class="countdown-status-badge ready" id="countdownStatusBadge">
+                            <span class="countdown-status-dot"></span><span id="countdownStatusText">PRONTO</span>
+                        </div>
+                        <div class="countdown-radial-wrapper">
+                            <svg class="countdown-radial-svg" viewBox="0 0 100 100">
+                                <defs>
+                                    <linearGradient id="countdownRingGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                        <stop offset="0%" stop-color="#38bdf8" />
+                                        <stop offset="50%" stop-color="#facc15" />
+                                        <stop offset="100%" stop-color="#f59e0b" />
+                                    </linearGradient>
+                                    <filter id="ringCyanGoldGlow" x="-20%" y="-20%" width="140%" height="140%">
+                                        <feDropShadow dx="0" dy="0" stdDeviation="2.5" flood-color="#38bdf8" flood-opacity="0.8"/>
+                                        <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#facc15" flood-opacity="0.6"/>
+                                    </filter>
+                                </defs>
+                                <circle class="countdown-bg-ring" cx="50" cy="50" r="38" fill="none" stroke="rgba(255, 255, 255, 0.12)" stroke-width="6" />
+                                <circle class="countdown-progress-ring" id="countdownProgressRing" cx="50" cy="50" r="38" fill="none" stroke="url(#countdownRingGradient)" stroke-width="6.5" stroke-linecap="round" stroke-dasharray="238.761" stroke-dashoffset="0" filter="url(#ringCyanGoldGlow)" />
+                                <text class="countdown-number" id="countdownNumber" x="50" y="47" text-anchor="middle" dominant-baseline="central" fill="#38bdf8" font-size="28" font-weight="900" font-family="system-ui, sans-serif">5</text>
+                                <text class="countdown-unit" id="countdownUnit" x="50" y="68" text-anchor="middle" dominant-baseline="central" fill="#facc15" font-size="8.5" font-weight="800" font-family="system-ui, sans-serif" letter-spacing="1">SEC</text>
+                            </svg>
+                        </div>
+                        <div class="countdown-timer" id="countdown" style="display: none;">5s</div>
+                        <div class="countdown-ritmo-box">
+                            <div class="countdown-ritmo-label"><i class="fas fa-tachometer-alt"></i> Ritmo</div>
+                            <div class="time-circles">
+                                <div class="time-circle" data-time="3">3s</div>
+                                <div class="time-circle active" data-time="5">5s</div>
+                                <div class="time-circle" data-time="7">7s</div>
+                                <div class="time-circle" data-time="10">10s</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="vertical-controls">
+                        <span class="box-id-badge">9</span>
+                        <button class="vertical-btn vertical-start" id="startBtn"><i class="fas fa-play"></i><span id="play-text">Play</span></button>
+                        <button class="vertical-btn vertical-pause" id="pauseBtn" disabled><i class="fas fa-pause"></i><span id="pause-text">Pausa</span></button>
+                        <button class="vertical-btn vertical-extract" id="extractBtn"><i class="fas fa-dice-one"></i><span id="extract-text">Estrai</span></button>
+                        <button class="vertical-btn vertical-clean" id="cleanBtn"><i class="fas fa-trash"></i><span id="reset-text">Reset</span></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODALE GUIDA UFFICIALE MESSA ONLINE & ANTEPRIMA STAMPABILE A4 -->
+<div class="online-guide-modal-overlay" id="onlineGuideModal" style="display: none;">
+  <div class="online-guide-modal-dialog">
+    <div class="online-guide-modal-header">
+      <div class="guide-modal-title-box">
+        <div class="guide-modal-badge"><i class="fas fa-cloud-upload-alt gold-text"></i> GUIDA UFFICIALE V15.15</div>
+        <h2>Come Mettere il Progetto in Rete (100% Gratis)</h2>
+        <p>Configurazione passo-passo per Render, Cloudflare Pages, Firebase Hosting e Vercel con Database Cloud</p>
+      </div>
+      <div class="guide-modal-header-actions">
+        <button type="button" class="guide-action-btn btn-print" id="modalPrintGuideBtn" title="Stampa la guida o salvala come PDF dal browser (Ctrl+P)">
+          <i class="fas fa-print"></i> <span>Stampa / PDF A4</span>
+        </button>
+        <button type="button" class="guide-action-btn btn-pdf" id="modalDownloadPdfBtn" title="Scarica il file PDF binario originale per Adobe Acrobat Reader">
+          <i class="fas fa-file-pdf"></i> <span>Scarica .PDF</span>
+        </button>
+        <button type="button" class="guide-action-btn btn-zip" id="modalDownloadZipBtn" title="Scarica il pacchetto ZIP completo pronto per GitHub">
+          <i class="fas fa-file-archive"></i> <span>Scarica .ZIP</span>
+        </button>
+        <button type="button" class="guide-modal-close" id="modalCloseHeaderBtn" title="Chiudi Finestra">&times;</button>
+      </div>
+    </div>
+    
+    <div class="online-guide-modal-body" id="onlineGuidePrintableContent">
+      <!-- Sezione Dati & Credenziali -->
+      <div class="guide-section-block">
+        <div class="guide-callout-box gold-border">
+          <div class="callout-header"><i class="fas fa-shield-alt gold-text"></i> DATI & CREDENZIALI CHIAVE DEL TUO SISTEMA</div>
+          <div class="callout-grid">
+            <div class="callout-item">
+              <span class="label">Password Accesso Regia:</span>
+              <span class="value key-badge">tombola90 <small>(oppure admin)</small></span>
+            </div>
+            <div class="callout-item">
+              <span class="label">Database Cloud Attivo:</span>
+              <span class="value">Firebase Firestore (Piano Spark 100% Gratuito)</span>
+            </div>
+            <div class="callout-item">
+              <span class="label">ID Progetto Firebase:</span>
+              <span class="value mono-badge">agile-lamp-6xq1s</span>
+            </div>
+            <div class="callout-item">
+              <span class="label">Costo Mensile di Hosting:</span>
+              <span class="value free-badge">0,00 € / Mese (Gratis per Sempre)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fase Preliminare: GitHub -->
+      <div class="guide-section-block">
+        <h3 class="guide-step-title"><i class="fab fa-github"></i> FASE PRELIMINARE: Inviare il Codice su GitHub (Passo Comune)</h3>
+        <p class="guide-text">Prima di collegare qualsiasi servizio di hosting, carica il codice nella tua repository GitHub:</p>
+        <ol class="guide-ordered-list">
+          <li>Crea una nuova repository pubblica su <a href="https://github.com/new" target="_blank" rel="noopener" style="color: #38bdf8;">github.com/new</a> con nome <code>tombola-90</code>.</li>
+          <li>Apri il terminale nel tuo computer nella cartella del progetto (oppure estrai lo ZIP scaricato) ed esegui:</li>
+        </ol>
+        <div class="guide-code-box">
+          <pre><code>git add .
+git commit -m "Tombola 90 Gold Edition"
+git branch -M main
+git remote add origin https://github.com/TUO-USERNAME/tombola-90.git
+git push -u origin main</code></pre>
+        </div>
+      </div>
+
+      <!-- Sezione 1: Render -->
+      <div class="guide-section-block">
+        <h3 class="guide-step-title highlight-blue"><i class="fas fa-server"></i> 1. CONFIGURAZIONE PASSO-PASSO AD HOC SU RENDER (100% Gratis & No-Sleep)</h3>
+        <div class="guide-badge-pill green"><i class="fas fa-check-circle"></i> Vantaggio: I "Static Sites" su Render non vanno mai in sleep e sono gratis per sempre!</div>
+        <p class="guide-text">I file di configurazione sono già pronti nel tuo progetto: il file <code>render.yaml</code> nella radice definisce la compilazione con Vite e i redirect per la Single Page Application.</p>
+        
+        <div class="guide-step-cards">
+          <div class="step-mini-card">
+            <span class="step-num">1</span>
+            <div>Vai su <b>render.com</b> e accedi tramite il pulsante <b>"GitHub"</b>.</div>
+          </div>
+          <div class="step-mini-card">
+            <span class="step-num">2</span>
+            <div>Nella Dashboard di Render, clicca in alto a destra su <b>+ New</b> ➔ seleziona <b>"Static Site"</b>.</div>
+          </div>
+          <div class="step-mini-card">
+            <span class="step-num">3</span>
+            <div>Clicca su <b>"Connect"</b> accanto al tuo repository <code>tombola-90</code>.</div>
+          </div>
+          <div class="step-mini-card">
+            <span class="step-num">4</span>
+            <div>
+              Compila i parametri richiesti (quasi tutti rilevati in automatico):
+              <ul class="sub-list">
+                <li><b>Name:</b> <code>tombola-90</code></li>
+                <li><b>Branch:</b> <code>main</code></li>
+                <li><b>Root Directory:</b> (lascia vuoto)</li>
+                <li><b>Build Command:</b> <code>npm run build</code></li>
+                <li><b>Publish Directory:</b> <code>dist</code></li>
+              </ul>
+            </div>
+          </div>
+          <div class="step-mini-card">
+            <span class="step-num">5</span>
+            <div>
+              Verifica Rewrite SPA: in basso nella sezione <b>Advanced ➔ Redirects/Rewrites</b>, grazie a <code>render.yaml</code> troverai già configurato:
+              <br><code>Source: /*</code> ➔ <code>Destination: /index.html</code> (Action: <b>Rewrite</b>).
+            </div>
+          </div>
+          <div class="step-mini-card">
+            <span class="step-num">6</span>
+            <div>Clicca sul pulsante <b>"Create Static Site"</b>. In circa 60 secondi il sito sarà online su: <br><span class="url-badge">https://tombola-90.onrender.com</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sezione 2: Cloudflare Pages -->
+      <div class="guide-section-block">
+        <h3 class="guide-step-title highlight-orange"><i class="fas fa-bolt"></i> 2. ALTERNATIVA TOP: CLOUDFLARE PAGES (Velocità Record & Traffico Illimitato)</h3>
+        <p class="guide-text">Cloudflare Pages è tra le piattaforme più veloci e performanti al mondo, con CDN globale e banda illimitata gratuita.</p>
+        <ol class="guide-ordered-list">
+          <li>Accedi su <b>dash.cloudflare.com</b> (crea un account gratuito in 30 secondi).</li>
+          <li>Nel menu laterale clicca su <b>Workers & Pages</b> ➔ scheda in alto <b>Pages</b> ➔ <b>"Connect to Git"</b>.</li>
+          <li>Seleziona la repository <code>tombola-90</code> e clicca su <b>"Begin setup"</b>.</li>
+          <li>Imposta:
+            <ul class="sub-list">
+              <li><b>Framework preset:</b> Vite</li>
+              <li><b>Build command:</b> <code>npm run build</code></li>
+              <li><b>Build output directory:</b> <code>dist</code></li>
+            </ul>
+          </li>
+          <li>Clicca <b>"Save and Deploy"</b> (il file <code>public/_redirects</code> è già incluso nel progetto per gestire i reindirizzamenti).</li>
+          <li>Il sito sarà subito attivo su: <span class="url-badge">https://tombola-90.pages.dev</span></li>
+        </ol>
+      </div>
+
+      <!-- Sezione 3: Google Firebase Hosting -->
+      <div class="guide-section-block">
+        <h3 class="guide-step-title highlight-gold"><i class="fas fa-fire"></i> 3. ALTERNATIVA NATIVA: GOOGLE FIREBASE HOSTING</h3>
+        <p class="guide-text">Dato che il database Firestore si trova già sul progetto Firebase <code>agile-lamp-6xq1s</code>, puoi pubblicare il sito direttamente sui server di Google senza dover autorizzare nessun dominio esterno!</p>
+        <p class="guide-text">Il file <code>firebase.json</code> è già predisposto nel progetto. Dal tuo terminale:</p>
+        <div class="guide-code-box">
+          <pre><code>npm install -g firebase-tools
+firebase login
+npm run build
+firebase deploy --only hosting</code></pre>
+        </div>
+        <p class="guide-text">Il sito sarà subito live su: <span class="url-badge">https://agile-lamp-6xq1s.web.app</span></p>
+      </div>
+
+      <!-- Sezione 4: Vercel -->
+      <div class="guide-section-block">
+        <h3 class="guide-step-title"><i class="fas fa-play"></i> 4. ALTERNATIVA VERCEL</h3>
+        <p class="guide-text">Anche Vercel è supportato nativamente grazie al file <code>vercel.json</code> già configurato:</p>
+        <ol class="guide-ordered-list">
+          <li>Vai su <b>vercel.com</b> e fai login con GitHub.</li>
+          <li>Clicca su <b>"Add New..."</b> ➔ <b>"Project"</b>.</li>
+          <li>Fai Import della repository <code>tombola-90</code> e clicca <b>Deploy</b>. Il sito sarà attivo su <code>https://tombola-90.vercel.app</code>.</li>
+        </ol>
+      </div>
+
+      <!-- Sezione 5: Dominio Firebase -->
+      <div class="guide-section-block">
+        <div class="guide-callout-box warning-border">
+          <div class="callout-header"><i class="fas fa-exclamation-triangle" style="color: #f59e0b;"></i> FASE FINALE OBBLIGATORIA: Abilitare il Dominio nella Console Firebase</div>
+          <p class="guide-text" style="margin-top: 6px;">Se hai scelto <b>Render</b>, <b>Cloudflare</b> o <b>Vercel</b>, ricordati di autorizzare il dominio su Firebase per consentire la sincronizzazione del Montepremi Cloud:</p>
+          <ol class="guide-ordered-list">
+            <li>Apri la <b>Console Firebase</b> sul progetto <code>agile-lamp-6xq1s</code>.</li>
+            <li>Vai su <b>Authentication</b> ➔ scheda <b>Settings</b> ➔ <b>Authorized domains</b> (Domini autorizzati).</li>
+            <li>Clicca su <b>"Add domain"</b> e incolla il tuo link (senza <code>https://</code>):
+              <ul class="sub-list">
+                <li>Se hai usato Render: <code>tombola-90.onrender.com</code></li>
+                <li>Se hai usato Cloudflare: <code>tombola-90.pages.dev</code></li>
+                <li>Se hai usato Vercel: <code>tombola-90.vercel.app</code></li>
+              </ul>
+            </li>
+            <li>Clicca su <b>Salva</b>. Fine! Il tuo gioco è ora 100% operativo in rete con database cloud attivo.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <div class="online-guide-modal-footer">
+      <button type="button" class="guide-footer-btn print" id="modalPrintFooterBtn"><i class="fas fa-print"></i> Stampa Guida (A4 / PDF)</button>
+      <button type="button" class="guide-footer-btn download" id="modalDownloadFooterBtn"><i class="fas fa-file-pdf"></i> Scarica File PDF Diretto</button>
+      <button type="button" class="guide-footer-btn close" id="closeOnlineGuideModalBtn">Chiudi</button>
+    </div>
+  </div>
+</div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,81 @@
+{
+  "entities": {
+    "JackpotBank": {
+      "title": "JackpotBank",
+      "description": "Cumulative bank for unclaimed lottery prize pools and rollover jackpots across game sessions.",
+      "type": "object",
+      "properties": {
+        "accumulatedUnclaimed": {
+          "type": "number",
+          "description": "Total cumulative amount of unclaimed prizes carried over."
+        },
+        "currency": {
+          "type": "string",
+          "description": "Currency symbol (€, £, $)."
+        },
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp of last update."
+        },
+        "totalGamesRecorded": {
+          "type": "number",
+          "description": "Total number of games that have contributed to or drawn from this bank."
+        }
+      },
+      "required": ["accumulatedUnclaimed", "currency", "lastUpdated"]
+    },
+    "UnclaimedHistory": {
+      "title": "UnclaimedHistory",
+      "description": "Audit ledger of prize rollover deposits, recalls, and adjustments.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique ledger entry ID."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of the transaction."
+        },
+        "gameId": {
+          "type": "string",
+          "description": "Game identifier."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["deposit_expired", "recalled_into_game", "manual_adjustment", "reset"],
+          "description": "Type of transaction."
+        },
+        "amount": {
+          "type": "number",
+          "description": "Amount deposited or recalled."
+        },
+        "balanceAfter": {
+          "type": "number",
+          "description": "Cloud bank balance after transaction."
+        },
+        "prizeCategory": {
+          "type": "string",
+          "description": "Prize category that expired or was affected."
+        },
+        "note": {
+          "type": "string",
+          "description": "Human-readable description or log note."
+        }
+      },
+      "required": ["id", "timestamp", "type", "amount", "balanceAfter"]
+    }
+  },
+  "firestore": {
+    "/jackpot_bank/{bankId}": {
+      "schema": "JackpotBank",
+      "description": "Singleton or game category jackpot bank totals."
+    },
+    "/unclaimed_history/{historyId}": {
+      "schema": "UnclaimedHistory",
+      "description": "Detailed history of unclaimed prize rollover transactions."
+    }
+  }
+}

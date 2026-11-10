@@ -1,0 +1,27 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Test connection document
+    match /test/connection {
+      allow read, write: if true;
+    }
+
+    // Cumulative jackpot bank for rollover prizes
+    match /jackpot_bank/{bankId} {
+      allow read: if true;
+      allow write: if request.resource.data.accumulatedUnclaimed is number
+                   && request.resource.data.accumulatedUnclaimed >= 0
+                   && request.resource.data.currency is string;
+    }
+
+    // Ledger of prize deposits, recalls, and game sessions
+    match /unclaimed_history/{historyId} {
+      allow read: if true;
+      allow create: if request.resource.data.amount is number
+                    && request.resource.data.balanceAfter is number
+                    && request.resource.data.type in ['deposit_expired', 'recalled_into_game', 'manual_adjustment', 'reset'];
+      allow update, delete: if true;
+    }
+  }
+}
