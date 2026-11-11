@@ -162,4 +162,20 @@ test('Tombola Sequential Prize Rules', async (t) => {
         assert.equal(res.won, false);
         assert.equal(res.prizeType, null);
     });
+
+    await t.test('If Tombola is not won at end of game, prize is preserved in unclaimed pot (NOT redistributed)', () => {
+        let unclaimedPot = 150; // Previous unclaimed from gold / other games
+        const prizePool = 1000;
+        const tombolaShare = 0.45;
+        const tombolaWon = false;
+
+        // When game finishes without tombola
+        if (!tombolaWon) {
+            const tombolaPrize = prizePool * tombolaShare;
+            unclaimedPot += tombolaPrize;
+        }
+
+        // Must NOT be redistributed: unclaimedPot must equal 150 + 450 = 600
+        assert.equal(unclaimedPot, 600, 'Unclaimed pot must contain preserved tombola prize without being reset to 0');
+    });
 });

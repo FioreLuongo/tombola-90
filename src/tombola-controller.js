@@ -530,7 +530,7 @@ function startTombolaApp() {
         goldDisplay.textContent = numeroGold !== null ? numeroGold : '?';
     }
 
-    // ===== FUNZIONI PER L'ASSEGNAZIONE DEL MONTEPREMI NON VINTI A FINE GIOCO =====
+    // ===== FUNZIONI PER LA GESTIONE DEL MONTEPREMI NON VINTI A FINE GIOCO =====
     function assignUnclaimedPotToTombolaWinner(tombolaCartellaId) {
         if (unclaimedGoldTotal <= 0) return;
         const currency = document.getElementById('currencySelect').value;
@@ -538,17 +538,37 @@ function startTombolaApp() {
         showExtraWinPopup(tombolaCartellaId, premioExtra, currency);
         unclaimedGoldTotal = 0;
         updateUnclaimedPotDisplay();
+        if (window.TombolaSync) {
+            window.TombolaSync.broadcastUnclaimedUpdate(unclaimedGoldTotal);
+        }
     }
 
-    function assignUnclaimedPotToAllActiveCards() {
-        if (unclaimedGoldTotal <= 0) return;
-        const activeCartelle = generatedCartelle.filter(c => isCartellaActive(c.id));
-        if (activeCartelle.length === 0) return;
-        const currency = document.getElementById('currencySelect').value;
-        const premioPerCartella = unclaimedGoldTotal / activeCartelle.length;
-        showEndGameSplitPopup(activeCartelle, premioPerCartella, currency);
-        unclaimedGoldTotal = 0;
+    function handleGameEndWithoutTombola() {
+        // Se non ci sono vincite per la tombola, il premio NON deve essere ridistribuito.
+        // Deve andare direttamente nel montepremi non vinti!
+        const prizePool = parseFloat(document.getElementById('prizePool').value) || 0;
+        const currency = document.getElementById('currencySelect').value || '€';
+
+        if (!cartelleWins.tombola.won && !prizeDelaysConfig.tombola.expired) {
+            prizeDelaysConfig.tombola.expired = true;
+            const tombolaPrizeAmt = prizePool * (prizeDelaysConfig.tombola.potShare || 0.45);
+            unclaimedGoldTotal += tombolaPrizeAmt;
+            logRegiaEvent(`⚠️ Partita terminata senza Tombola: premio di ${currency} ${tombolaPrizeAmt.toFixed(2)} accantonato in Montepremi Non Vinti (NON ridistribuito).`, 'warn');
+        }
+
         updateUnclaimedPotDisplay();
+        syncRegiaUI();
+
+        if (window.TombolaSync) {
+            window.TombolaSync.broadcastUnclaimedUpdate(unclaimedGoldTotal);
+        }
+
+        showUnclaimedPreservedPopup();
+    }
+
+    // Compatibilità: reindirizza qualsiasi chiamata residua a non ridistribuire
+    function assignUnclaimedPotToAllActiveCards() {
+        handleGameEndWithoutTombola();
     }
 
     function showExtraWinPopup(cartellaId, premio, currency) {
@@ -572,7 +592,7 @@ function startTombolaApp() {
         playSound('win');
     }
 
-    function showEndGameSplitPopup(activeCartelle, premioPerCartella, currency) {
+    function showUnclaimedPreservedPopup() {
         const popup = document.getElementById('winPopup');
         const title = document.getElementById('winPopupTitle');
         const details = document.getElementById('winPopupDetails');
@@ -581,13 +601,22 @@ function startTombolaApp() {
         const winners = document.getElementById('winPopupWinners');
 
         if (!popup || !title || !details || !winNumbers || !cartellaIdElement || !winners) return;
+        const currency = document.getElementById('currencySelect').value || '€';
 
-        title.textContent = currentLanguage === 'it' ? 'MONTEPREMI NON VINTI DISTRIBUITO!' : 'UNCLAIMED PRIZE POOL DISTRIBUTED!';
-        details.textContent = currentLanguage === 'it' ? 'Il gioco è terminato senza Tombola. Il montepremi non vinto è stato suddiviso tra tutte le cartelle attive.' : 'The game ended without Tombola. The unclaimed prize pool has been split among all active cards.';
+        title.textContent = currentLanguage === 'it' ? 'PARTITA TERMINATA SENZA TOMBOLA' : 'GAME ENDED WITHOUT TOMBOLA';
+        details.innerHTML = currentLanguage === 'it'
+            ? `<div style="font-size: 14px; line-height: 1.6; color: #f8fafc;">
+                 Nessuna cartella ha realizzato la <b>Tombola</b>.<br>
+                 <span style="color: #facc15; font-weight: bold;">Il premio non viene ridistribuito</span>, ma è stato accantonato nel <b>Montepremi Non Vinti</b> per le prossime partite!
+               </div>`
+            : `<div style="font-size: 14px; line-height: 1.6; color: #f8fafc;">
+                 No card achieved <b>Tombola</b>.<br>
+                 <span style="color: #facc15; font-weight: bold;">The prize is not redistributed</span>; it has been saved to the <b>Unclaimed Prize Pool</b> for upcoming games!
+               </div>`;
         winNumbers.textContent = '';
         cartellaIdElement.style.display = 'none';
-        winners.innerHTML = `<div style="max-height: 150px; overflow-y: auto;">
-            ${activeCartelle.map(c => `<div>${c.id}: ${currency}${premioPerCartella.toFixed(2)}</div>`).join('')}
+        winners.innerHTML = `<div style="font-size: 16px; font-weight: 900; color: #22c55e; margin-top: 10px;">
+            ${currentLanguage === 'it' ? 'Saldo Attuale Montepremi Non Vinti:' : 'Current Unclaimed Pool:'} ${currency} ${unclaimedGoldTotal.toFixed(2)}
         </div>`;
 
         popup.style.display = 'flex';
@@ -1479,23 +1508,25 @@ function startTombolaApp() {
                     cell.style.fontWeight = '900';
                     cell.style.boxShadow = '0 0 6px rgba(250, 204, 21, 0.6)';
                 } else if (winningNumbersByCartella[cartellaId] && winningNumbersByCartella[cartellaId].includes(number)) {
-                    // NUMERO VINCENTE: EVIDENZIATO ESCLUSIVAMENTE IN ROSSO VIBRANTE CON BORDO BIANCO
+                    // NUMERO VINCENTE: EVIDENZIATO IN VERDE (NON LAMPEGGIANTE)
                     cell.className = 'cartella-cell has-number winning-number';
-                    cell.style.background = '#dc2626';
+                    cell.style.background = '#16a34a';
                     cell.style.color = '#ffffff';
                     cell.style.border = '2px solid #ffffff';
                     cell.style.borderRadius = '3px';
                     cell.style.fontWeight = '950';
-                    cell.style.boxShadow = '0 0 16px rgba(220, 38, 38, 0.95)';
+                    cell.style.boxShadow = '0 0 10px rgba(22, 163, 74, 0.8)';
+                    cell.style.animation = 'none';
                 } else {
-                    // NUMERO ESTRATTO REGOLARE (NON VINCENTE): MARCATO IN VERDE SMERALDO
+                    // NUMERO ESTRATTO REGOLARE (NON VINCENTE): RIMANE IN ROSSO
                     cell.className = 'cartella-cell has-number extracted';
-                    cell.style.background = '#059669';
+                    cell.style.background = '#dc2626';
                     cell.style.color = '#ffffff';
-                    cell.style.border = '1px solid #047857';
+                    cell.style.border = '1px solid #b91c1c';
                     cell.style.borderRadius = '3px';
                     cell.style.fontWeight = '900';
-                    cell.style.boxShadow = '0 0 4px rgba(5, 150, 105, 0.4)';
+                    cell.style.boxShadow = '0 0 4px rgba(220, 38, 38, 0.45)';
+                    cell.style.animation = 'none';
                 }
             } else {
                 // Cartella/striscia NON attiva oppure numero non estratto: NON MARCARE!
@@ -2414,6 +2445,88 @@ function startTombolaApp() {
         if (aiIntelligenceEnabled) analyzeAllCartelleAdvanced();
     }
 
+    function processExtractedNumber(newNumber, isFromRemote = false, customSmorfia = '') {
+        if (!newNumber || extractedNumbers.includes(newNumber)) return;
+
+        if (numeroGold === null && generatedCartelle.length > 0) {
+            getGoldNumberForExtraction();
+        }
+
+        extractedNumbers.push(newNumber);
+        extractionCount++;
+        lastExtractionTime = Date.now();
+        if (!extractionStartTime) extractionStartTime = Date.now();
+        playSound('extract');
+        speakNumber(newNumber);
+
+        const currentNumberElement = document.getElementById('currentNumber');
+        if (currentNumberElement) {
+            currentNumberElement.textContent = newNumber;
+            currentNumberElement.classList.add('extract-animation');
+            setTimeout(() => { currentNumberElement.classList.remove('extract-animation'); }, 1000);
+        }
+
+        if (customSmorfia) {
+            const smorfiaEl = document.getElementById('smorfiaText');
+            if (smorfiaEl) smorfiaEl.textContent = customSmorfia;
+        } else {
+            updateSmorfiaDisplay(newNumber);
+        }
+
+        const numberElement = document.getElementById(`number-${newNumber}`);
+        if (numberElement) {
+            numberElement.classList.remove('flip-circle', 'flipping-to-green-phase1', 'flipping-to-green-phase2');
+            numberElement.classList.add('extracted');
+            if (newNumber !== numeroGold) {
+                setTimeout(() => {
+                    if (numberElement.classList.contains('extracted')) {
+                        // Fase 1: La pedina ROSSA ruota sull'asse Y da 0° a 90° (va di taglio)
+                        numberElement.classList.add('flipping-to-green-phase1');
+                        setTimeout(() => {
+                            if (numberElement.classList.contains('extracted')) {
+                                // Fase 2: Al taglio esatto (90°), diventa VERDE e ruota da -90° a 0° tornando frontale
+                                numberElement.classList.remove('flipping-to-green-phase1');
+                                numberElement.classList.add('flip-circle', 'flipping-to-green-phase2');
+                                setTimeout(() => {
+                                    if (numberElement.classList.contains('extracted')) {
+                                        numberElement.classList.remove('flipping-to-green-phase2');
+                                    }
+                                }, 450);
+                            }
+                        }, 400);
+                    }
+                }, 3000);
+            }
+        }
+
+        checkGoldExpiration();
+
+        updateLastNumbers(newNumber);
+        updateProgress();
+        updateGameStats(newNumber);
+
+        if (generatedCartelle.length > 0) checkCartelleWinsAdvanced(newNumber);
+        else updateCartelleExtractedNumbers();
+
+        if (extractedNumbers.length >= 90) {
+            setTimeout(showTombolaPopup, 500);
+            if (!cartelleWins.tombola.won) {
+                handleGameEndWithoutTombola();
+            }
+        }
+
+        // Sincronizzazione Live immediata con la console Regia e il Mini-Tabellone
+        syncRegiaUI();
+        logRegiaEvent(`Estratto numero: ${newNumber} (${extractionCount}/90).`, 'info');
+
+        // Trasmissione WebSocket in tempo reale a tutti gli schermi TV Studio connessi
+        if (!isFromRemote && window.TombolaSync) {
+            const smorfiaEl = document.getElementById('smorfiaText');
+            const smText = smorfiaEl ? smorfiaEl.textContent : '';
+            window.TombolaSync.broadcastExtract(newNumber, smText);
+        }
+    }
+
     function extractNumber() {
         if (!canStartGame()) return;
 
@@ -2438,67 +2551,12 @@ function startTombolaApp() {
             if (extractedNumbers.length === 89) {
                 showTombolaPopup();
                 stopTimer();
-                assignUnclaimedPotToAllActiveCards();
+                handleGameEndWithoutTombola();
             }
             return;
         }
 
-        extractedNumbers.push(newNumber);
-        extractionCount++;
-        lastExtractionTime = Date.now();
-        if (!extractionStartTime) extractionStartTime = Date.now();
-        playSound('extract');
-        speakNumber(newNumber);
-
-        const currentNumberElement = document.getElementById('currentNumber');
-        currentNumberElement.textContent = newNumber;
-        currentNumberElement.classList.add('extract-animation');
-        updateSmorfiaDisplay(newNumber);
-        setTimeout(() => { currentNumberElement.classList.remove('extract-animation'); }, 1000);
-
-        const numberElement = document.getElementById(`number-${newNumber}`);
-        numberElement.classList.remove('flip-circle', 'flipping-to-green-phase1', 'flipping-to-green-phase2');
-        numberElement.classList.add('extracted');
-        if (newNumber !== numeroGold) {
-            setTimeout(() => {
-                if (numberElement.classList.contains('extracted')) {
-                    // Fase 1: La pedina ROSSA ruota sull'asse Y da 0° a 90° (va di taglio)
-                    numberElement.classList.add('flipping-to-green-phase1');
-                    setTimeout(() => {
-                        if (numberElement.classList.contains('extracted')) {
-                            // Fase 2: Al taglio esatto (90°), diventa VERDE e ruota da -90° a 0° tornando frontale
-                            numberElement.classList.remove('flipping-to-green-phase1');
-                            numberElement.classList.add('flip-circle', 'flipping-to-green-phase2');
-                            setTimeout(() => {
-                                if (numberElement.classList.contains('extracted')) {
-                                    numberElement.classList.remove('flipping-to-green-phase2');
-                                }
-                            }, 450);
-                        }
-                    }, 400);
-                }
-            }, 3000);
-        }
-
-        checkGoldExpiration();
-
-        updateLastNumbers(newNumber);
-        updateProgress();
-        updateGameStats(newNumber);
-
-        if (generatedCartelle.length > 0) checkCartelleWinsAdvanced(newNumber);
-        else updateCartelleExtractedNumbers();
-
-        if (extractedNumbers.length >= 90) {
-            setTimeout(showTombolaPopup, 500);
-            if (!cartelleWins.tombola.won) {
-                assignUnclaimedPotToAllActiveCards();
-            }
-        }
-
-        // Sincronizzazione Live immediata con la console Regia e il Mini-Tabellone
-        syncRegiaUI();
-        logRegiaEvent(`Estratto numero: ${newNumber} (${extractionCount}/90).`, 'info');
+        processExtractedNumber(newNumber, false);
     }
 
     function updateLastNumbers(newNumber) {
@@ -2515,7 +2573,7 @@ function startTombolaApp() {
         lastNumbers[0].style.transform = 'scale(1.1)';
     }
 
-    function startTimer() {
+    function startTimer(fromRemote = false) {
         if (!canStartGame()) return;
 
         if (numeroGold === null && generatedCartelle.length > 0) {
@@ -2551,19 +2609,27 @@ function startTombolaApp() {
                     updateCountdown();
                 }
             },1000);
+
+            if (!fromRemote && window.TombolaSync) {
+                window.TombolaSync.broadcastStartTimer(currentTimer);
+            }
         }
     }
 
-    function stopTimer() {
+    function stopTimer(fromRemote = false) {
         isRunning = false;
         document.getElementById('startBtn').disabled = false;
         document.getElementById('pauseBtn').disabled = true;
         clearInterval(countdownInterval);
         updateCountdown();
         syncRegiaUI();
+
+        if (!fromRemote && window.TombolaSync) {
+            window.TombolaSync.broadcastPauseTimer();
+        }
     }
 
-    function resetGame() {
+    function resetGame(fromRemote = false) {
         if (numeroGold) {
             const oldGoldElement = document.getElementById(`number-${numeroGold}`);
             if (oldGoldElement) {
@@ -2722,6 +2788,10 @@ function startTombolaApp() {
         updateGameStats();
 
         if (document.getElementById('cartelleSection').classList.contains('active')) renderCartelle();
+
+        if (!fromRemote && window.TombolaSync) {
+            window.TombolaSync.broadcastResetGame(true, parseFloat(document.getElementById('prizePool').value) || 0, document.getElementById('currencySelect').value);
+        }
     }
 
     function showTombolaPopup() {
@@ -2926,10 +2996,11 @@ function startTombolaApp() {
                             const wCell = cartEl.querySelector(`.cartella-cell[data-number="${wNum}"]`);
                             if (wCell) {
                                 wCell.classList.add('winning-number');
-                                wCell.style.background = '#dc2626';
+                                wCell.style.background = '#16a34a';
                                 wCell.style.color = '#ffffff';
                                 wCell.style.border = '2px solid #ffffff';
-                                wCell.style.boxShadow = '0 0 16px rgba(220, 38, 38, 0.95)';
+                                wCell.style.boxShadow = '0 0 10px rgba(22, 163, 74, 0.8)';
+                                wCell.style.animation = 'none';
                             }
                         });
                     }
@@ -2941,9 +3012,13 @@ function startTombolaApp() {
     // ========================================================
     // GESTIONE INTELLIGENTE VINCITE (AUTO-RIPRESA & LIVE STREAM)
     // ========================================================
-    function handleGameWinEvent(winningType, winningCartellaIds, winningNumbers, winningRowIndex) {
+    function handleGameWinEvent(winningType, winningCartellaIds, winningNumbers, winningRowIndex, fromRemote = false) {
         displayWinningCartella(winningCartellaIds[0]);
         highlightWinningElements(winningType, winningCartellaIds, winningNumbers, winningRowIndex);
+
+        if (!fromRemote && window.TombolaSync) {
+            window.TombolaSync.broadcastWin(winningType, winningCartellaIds, winningNumbers, winningRowIndex);
+        }
 
         if (winningType === 'tombola') {
             stopTimer();
@@ -3429,6 +3504,10 @@ function startTombolaApp() {
         try {
             localStorage.setItem('tombola_tv_graphic', JSON.stringify(tvGraphicState));
         } catch(e) {}
+
+        if (window.TombolaSync) {
+            window.TombolaSync.broadcastGraphicsUpdate(tvGraphicState);
+        }
     }
 
     function initTvGraphicsManager() {
@@ -3731,10 +3810,16 @@ function startTombolaApp() {
         document.getElementById('prizePool').addEventListener('input', function() {
             updatePrizes();
             syncRegiaUI();
+            if (window.TombolaSync) {
+                window.TombolaSync.broadcastPrizePoolUpdate(parseFloat(this.value) || 0, document.getElementById('currencySelect').value);
+            }
         });
         document.getElementById('currencySelect').addEventListener('change', function() {
             updatePrizes();
             syncRegiaUI();
+            if (window.TombolaSync) {
+                window.TombolaSync.broadcastPrizePoolUpdate(parseFloat(document.getElementById('prizePool').value) || 0, this.value);
+            }
         });
 
         document.querySelectorAll('.time-circle').forEach(circle => {
@@ -4496,6 +4581,132 @@ function startTombolaApp() {
         });
     }
 
+    function setupRealtimeWebSocketSync() {
+        if (!window.TombolaSync) return;
+
+        // 1. Ricezione estrazione numero in tempo reale dal server / Regia
+        window.TombolaSync.on('NUMBER_EXTRACTED', (data) => {
+            if (data && data.number) {
+                if (!extractedNumbers.includes(data.number)) {
+                    processExtractedNumber(data.number, true, data.smorfia);
+                }
+            }
+        });
+
+        // 2. Ricezione avvio timer da Regia
+        window.TombolaSync.on('TIMER_STARTED', (data) => {
+            if (data && data.interval) {
+                currentTimer = data.interval;
+                remainingTime = data.interval;
+            }
+            startTimer(true);
+        });
+
+        // 3. Ricezione pausa timer da Regia
+        window.TombolaSync.on('TIMER_PAUSED', () => {
+            stopTimer(true);
+        });
+
+        // 4. Ricezione reset gioco da Regia
+        window.TombolaSync.on('GAME_RESET', () => {
+            resetGame(true);
+        });
+
+        // 5. Ricezione vincita dichiarata (Ambo, Terno, Tombola, ecc.)
+        window.TombolaSync.on('WIN_DECLARED', (data) => {
+            if (data && data.winType && data.winningCartellaIds) {
+                handleGameWinEvent(data.winType, data.winningCartellaIds, data.winningNumbers || [], data.winningRowIndex, true);
+            }
+        });
+
+        // 6. Ricezione aggiornamento Montepremi Non Vinti
+        window.TombolaSync.on('UNCLAIMED_UPDATED', (data) => {
+            if (data && typeof data.unclaimedPot === 'number') {
+                unclaimedGoldTotal = data.unclaimedPot;
+                updateUnclaimedPotDisplay();
+            }
+        });
+
+        // 7. Ricezione aggiornamento Montepremi e Valuta
+        window.TombolaSync.on('PRIZE_POOL_UPDATED', (data) => {
+            if (data && typeof data.prizePool === 'number') {
+                const poolInput = document.getElementById('prizePool');
+                if (poolInput) poolInput.value = data.prizePool;
+                if (data.currency) {
+                    const currSelect = document.getElementById('currencySelect');
+                    if (currSelect) currSelect.value = data.currency;
+                }
+                updatePrizes();
+            }
+        });
+
+        // 8. Ricezione aggiornamento grafiche broadcast TV Live
+        window.TombolaSync.on('GRAPHICS_UPDATED', (data) => {
+            if (data && data.tvGraphics) {
+                Object.assign(tvGraphicState, data.tvGraphics);
+                applyTvGraphicState();
+            }
+        });
+
+        // 9. Ricezione stato iniziale completo (se la TV si connette a partita già iniziata)
+        window.TombolaSync.on('STATE_INIT', (data) => {
+            if (data && data.state) {
+                const st = data.state;
+                if (st.unclaimedPot !== undefined && st.unclaimedPot > 0 && unclaimedGoldTotal === 0) {
+                    unclaimedGoldTotal = st.unclaimedPot;
+                    updateUnclaimedPotDisplay();
+                }
+                if (st.extractedNumbers && st.extractedNumbers.length > 0) {
+                    st.extractedNumbers.forEach(n => {
+                        if (!extractedNumbers.includes(n)) {
+                            processExtractedNumber(n, true);
+                        }
+                    });
+                }
+                if (st.tvGraphics) {
+                    Object.assign(tvGraphicState, st.tvGraphics);
+                    applyTvGraphicState();
+                }
+            }
+        });
+
+        // 10. Aggiorna badge stato WebSocket in console Regia
+        window.TombolaSync.onStatusChange((status, clientCount) => {
+            const badge = document.getElementById('regiaWsBadge');
+            const txt = document.getElementById('regiaWsText');
+            if (badge && txt) {
+                if (status === 'connected') {
+                    badge.className = 'regia-ws-badge active';
+                    txt.innerHTML = `<span class="ws-dot active"></span> WS Live (${clientCount} ${clientCount === 1 ? 'schermo' : 'schermi'})`;
+                } else if (status === 'connecting') {
+                    badge.className = 'regia-ws-badge connecting';
+                    txt.innerHTML = `<span class="ws-dot connecting"></span> Connessione WS...`;
+                } else {
+                    badge.className = 'regia-ws-badge offline';
+                    txt.innerHTML = `<span class="ws-dot offline"></span> WS Locale (BroadcastChannel)`;
+                }
+            }
+        });
+
+        // Pulsante in Regia: Apri TV Studio (2° Monitor / Nuova Finestra)
+        const openTvExtBtn = document.getElementById('regiaOpenTvExtBtn');
+        if (openTvExtBtn) {
+            openTvExtBtn.addEventListener('click', () => {
+                const tvUrl = `${window.location.origin}${window.location.pathname}?view=tv`;
+                window.open(tvUrl, 'Tombola90TvStudio', 'width=1920,height=1080,menubar=no,toolbar=no,location=no,status=no');
+                logRegiaEvent('Aperta finestra TV Studio su secondo monitor/finestra.', 'info');
+            });
+        }
+
+        // Se l'URL contiene ?view=tv, apri direttamente lo Schermo TV Studio senza Regia attiva
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('view') === 'tv' || urlParams.get('mode') === 'tv') {
+            closeRegia();
+            document.body.classList.add('tv-studio-active');
+            logRegiaEvent('Modalità Schermo TV Studio attiva.', 'info');
+        }
+    }
+
     // Expose testable handle for automated inspection & verification
     window.__tombolaGame = {
         getSequentialActivePrize,
@@ -4504,14 +4715,17 @@ function startTombolaApp() {
         getActiveColorSheets: () => activeColorSheets,
         getExtractedNumbers: () => extractedNumbers,
         extractNumber,
+        processExtractedNumber,
         resetGame,
         highlightWinningElements,
         getTvGraphicState: () => tvGraphicState,
-        applyTvGraphicState
+        applyTvGraphicState,
+        setupRealtimeWebSocketSync
     };
 
     initializeApp();
     setupEventListeners();
+    setupRealtimeWebSocketSync();
 }
 
 if (document.readyState === 'loading') {

@@ -2325,13 +2325,13 @@ body:not(.dark-mode) .smorfia-text {
 }
 
 .jumbo-grid .cartella-cell.winning-number {
-  background: linear-gradient(145deg, #ef4444 0%, #dc2626 50%, #991b1b 100%) !important;
+  background: #16a34a !important;
   color: #ffffff !important;
   border: 2px solid #ffffff !important;
   font-weight: 950 !important;
   border-radius: 4px !important;
-  box-shadow: 0 0 16px rgba(239, 68, 68, 0.95), 0 0 4px rgba(255, 255, 255, 0.8), inset 0 1px 2px rgba(255, 255, 255, 0.9) !important;
-  animation: winningNumberBeat 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate !important;
+  box-shadow: 0 0 10px rgba(22, 163, 74, 0.8), inset 0 1px 2px rgba(255, 255, 255, 0.6) !important;
+  animation: none !important;
 }
 
 .jumbo-strip.inactive-strip {
@@ -2552,7 +2552,7 @@ body:not(.dark-mode) .smorfia-text {
   font-weight: 900 !important;
   border-color: #b91c1c !important;
   border-radius: 3px !important;
-  box-shadow: 0 1px 3px rgba(220, 38, 38, 0.4) !important;
+  box-shadow: 0 1px 3px rgba(220, 38, 38, 0.45) !important;
 }
 
 .cartella-cell.extracted-gold {
@@ -2565,13 +2565,13 @@ body:not(.dark-mode) .smorfia-text {
 }
 
 .cartella-cell.winning-number {
-  background: linear-gradient(145deg, #ef4444 0%, #dc2626 50%, #991b1b 100%) !important;
+  background: #16a34a !important;
   color: #ffffff !important;
   font-weight: 950 !important;
   border: 2px solid #ffffff !important;
   border-radius: 4px !important;
-  box-shadow: 0 0 16px rgba(239, 68, 68, 0.95), 0 0 4px rgba(255, 255, 255, 0.8), inset 0 1px 2px rgba(255, 255, 255, 0.9) !important;
-  animation: winningNumberBeat 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate !important;
+  box-shadow: 0 0 10px rgba(22, 163, 74, 0.8), inset 0 1px 2px rgba(255, 255, 255, 0.8) !important;
+  animation: none !important;
 }
 
 /* ========================================================
@@ -3252,16 +3252,17 @@ body:not(.dark-mode) .smorfia-text {
 }
 
 .winning-cartella-mini .mini-cell.extracted {
-  background: #10b981;
-  color: white;
+  background: #dc2626 !important;
+  color: white !important;
 }
 
 .winning-cartella-mini .mini-cell.winning-number {
-  background: linear-gradient(145deg, #ef4444 0%, #dc2626 50%, #991b1b 100%) !important;
+  background: #16a34a !important;
   color: #ffffff !important;
   border: 1.5px solid #ffffff !important;
   font-weight: 950 !important;
-  box-shadow: 0 0 12px rgba(239, 68, 68, 0.95) !important;
+  box-shadow: 0 0 10px rgba(22, 163, 74, 0.8) !important;
+  animation: none !important;
 }
 
 .winning-cartella-mini .close-btn {
@@ -3502,6 +3503,76 @@ nav > .box-id-badge {
   0% { box-shadow: 0 0 4px rgba(225, 29, 72, 0.4); opacity: 1; }
   50% { box-shadow: 0 0 14px rgba(225, 29, 72, 0.9); opacity: 0.85; }
   100% { box-shadow: 0 0 4px rgba(225, 29, 72, 0.4); opacity: 1; }
+}
+
+/* WebSocket Live Synchronization Badge in Regia */
+.regia-ws-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #34d399;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.6px;
+  margin-left: 6px;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.25);
+}
+
+.regia-ws-badge.connecting {
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+}
+
+.regia-ws-badge.offline {
+  background: rgba(100, 116, 139, 0.2);
+  border-color: rgba(100, 116, 139, 0.4);
+  color: #94a3b8;
+}
+
+.ws-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.ws-dot.active {
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+  animation: wsDotPulse 1.8s infinite ease-in-out;
+}
+
+.ws-dot.connecting {
+  background: #f59e0b;
+  animation: wsDotPulse 1s infinite ease-in-out;
+}
+
+.ws-dot.offline {
+  background: #94a3b8;
+}
+
+@keyframes wsDotPulse {
+  0% { transform: scale(0.9); opacity: 0.7; }
+  50% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(0.9); opacity: 0.7; }
+}
+
+.regia-header-controls .regia-btn.regia-btn-tv-ext {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(5, 150, 105, 0.35) 100%) !important;
+  border: 1px solid rgba(52, 211, 153, 0.5) !important;
+  color: #a7f3d0 !important;
+}
+
+.regia-header-controls .regia-btn.regia-btn-tv-ext:hover {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.4) 0%, rgba(5, 150, 105, 0.5) 100%) !important;
+  border-color: #34d399 !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.4) !important;
 }
 
 .regia-header-right {
@@ -5506,7 +5577,7 @@ body:not(.dark-mode) .tv-rollover-badge {
   }
 
   .jumbo-grid .cartella-cell.winning-number {
-    background: #dc2626 !important;
+    background: #16a34a !important;
     color: #ffffff !important;
     border: 2px solid #ffffff !important;
     border-radius: 3px !important;
@@ -5616,25 +5687,25 @@ body:not(.dark-mode) .tv-rollover-badge {
   0%, 100% { filter: none; box-shadow: none; }
 }
 
-/* Numeri vincenti nelle cartelle: EVIDENZIATI IN ROSSO CON BORDO BIANCO */
+/* Numeri vincenti nelle cartelle: EVIDENZIATI IN VERDE (NON LAMPEGGIANTI) */
 .cartella-cell.winning-number,
 .jumbo-grid .cartella-cell.winning-number {
-  background: linear-gradient(145deg, #ef4444 0%, #dc2626 50%, #991b1b 100%) !important;
+  background: #16a34a !important;
   color: #ffffff !important;
   border: 2px solid #ffffff !important;
   font-weight: 950 !important;
   border-radius: 4px !important;
-  box-shadow: 0 0 16px rgba(239, 68, 68, 0.95), 0 0 6px rgba(255, 255, 255, 0.8), inset 0 1px 3px rgba(255, 255, 255, 0.9) !important;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9) !important;
+  box-shadow: 0 0 10px rgba(22, 163, 74, 0.8), inset 0 1px 2px rgba(255, 255, 255, 0.8) !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6) !important;
   -webkit-text-fill-color: #ffffff !important;
-  animation: winningNumberBeat 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate !important;
+  animation: none !important;
   position: relative;
   z-index: 10 !important;
 }
 
 @keyframes winningNumberBeat {
-  0% { transform: scale(1.02); filter: brightness(1); }
-  100% { transform: scale(1.14); filter: brightness(1.25); }
+  0% { transform: scale(1); }
+  100% { transform: scale(1); }
 }
 
 /* Whole cartella Tombola celebration */
@@ -5649,7 +5720,7 @@ body:not(.dark-mode) .tv-rollover-badge {
   100% { box-shadow: 0 0 50px rgba(250, 204, 21, 1), 0 0 90px rgba(245, 158, 11, 0.75); }
 }
 
-/* Mini-Cartella in Ultima Vincente: Solo i numeri vincenti in rosso */
+/* Mini-Cartella in Ultima Vincente: Solo i numeri vincenti in verde (non lampeggianti) */
 .winning-cartella-mini .mini-cell.win-row-highlight {
   background: transparent !important;
   border: none !important;
@@ -5658,12 +5729,12 @@ body:not(.dark-mode) .tv-rollover-badge {
 }
 
 .winning-cartella-mini .mini-cell.winning-number {
-  background: linear-gradient(145deg, #ef4444 0%, #dc2626 50%, #991b1b 100%) !important;
+  background: #16a34a !important;
   color: #ffffff !important;
   border: 1.5px solid #ffffff !important;
   font-weight: 950 !important;
-  box-shadow: 0 0 14px rgba(239, 68, 68, 0.95), inset 0 1px 2px rgba(255, 255, 255, 0.8) !important;
-  animation: winningNumberBeat 1.1s infinite alternate !important;
+  box-shadow: 0 0 10px rgba(22, 163, 74, 0.8), inset 0 1px 2px rgba(255, 255, 255, 0.8) !important;
+  animation: none !important;
 }
 
 /* ==========================================================================
@@ -6582,10 +6653,10 @@ body:not(.dark-mode) .winning-cartella-mini .mini-cell.extracted {
 }
 
 body:not(.dark-mode) .winning-cartella-mini .mini-cell.winning-number {
-  background: #dc2626 !important;
+  background: #16a34a !important;
   color: #ffffff !important;
   border: 2px solid #ffffff !important;
-  box-shadow: 0 0 10px rgba(220, 38, 38, 0.85) !important;
+  box-shadow: 0 0 10px rgba(22, 163, 74, 0.85) !important;
 }
 
 /* 15. Sezione Cartelle A4 in Light Mode */

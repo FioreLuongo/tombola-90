@@ -2041,12 +2041,13 @@ body:not(.dark-mode) .smorfia-text {
 }
 
 .jumbo-grid .cartella-cell.winning-number {
-  background: #ea580c !important;
+  background: #16a34a !important;
   color: #ffffff !important;
-  border-color: #c2410c !important;
-  font-weight: 900 !important;
-  border-radius: 3px !important;
-  box-shadow: 0 0 6px rgba(234, 88, 12, 0.6) !important;
+  border: 2px solid #ffffff !important;
+  font-weight: 950 !important;
+  border-radius: 4px !important;
+  box-shadow: 0 0 10px rgba(22, 163, 74, 0.8), inset 0 1px 2px rgba(255, 255, 255, 0.6) !important;
+  animation: none !important;
 }
 
 .jumbo-strip.inactive-strip {
@@ -2267,7 +2268,7 @@ body:not(.dark-mode) .smorfia-text {
   font-weight: 900 !important;
   border-color: #b91c1c !important;
   border-radius: 3px !important;
-  box-shadow: 0 1px 3px rgba(220, 38, 38, 0.4) !important;
+  box-shadow: 0 1px 3px rgba(220, 38, 38, 0.45) !important;
 }
 
 .cartella-cell.extracted-gold {
@@ -2280,12 +2281,13 @@ body:not(.dark-mode) .smorfia-text {
 }
 
 .cartella-cell.winning-number {
-  background: #ea580c !important;
+  background: #16a34a !important;
   color: #ffffff !important;
-  font-weight: 900 !important;
-  border: 1px solid #c2410c !important;
-  border-radius: 3px !important;
-  box-shadow: 0 0 8px rgba(234, 88, 12, 0.6) !important;
+  font-weight: 950 !important;
+  border: 2px solid #ffffff !important;
+  border-radius: 4px !important;
+  box-shadow: 0 0 10px rgba(22, 163, 74, 0.8), inset 0 1px 2px rgba(255, 255, 255, 0.8) !important;
+  animation: none !important;
 }
 
 /* ========================================================
@@ -2966,14 +2968,15 @@ body:not(.dark-mode) .smorfia-text {
 }
 
 .winning-cartella-mini .mini-cell.extracted {
-  background: #10b981;
+  background: #dc2626;
   color: white;
 }
 
 .winning-cartella-mini .mini-cell.winning-number {
-  background: #f59e0b;
+  background: #16a34a;
   color: white;
-  border: 1px solid #fde047;
+  border: 1px solid #ffffff;
+  animation: none !important;
 }
 
 .winning-cartella-mini .close-btn {
@@ -3214,6 +3217,76 @@ nav > .box-id-badge {
   0% { box-shadow: 0 0 4px rgba(225, 29, 72, 0.4); opacity: 1; }
   50% { box-shadow: 0 0 14px rgba(225, 29, 72, 0.9); opacity: 0.85; }
   100% { box-shadow: 0 0 4px rgba(225, 29, 72, 0.4); opacity: 1; }
+}
+
+/* WebSocket Live Synchronization Badge in Regia */
+.regia-ws-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #34d399;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.6px;
+  margin-left: 6px;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.25);
+}
+
+.regia-ws-badge.connecting {
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+}
+
+.regia-ws-badge.offline {
+  background: rgba(100, 116, 139, 0.2);
+  border-color: rgba(100, 116, 139, 0.4);
+  color: #94a3b8;
+}
+
+.ws-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.ws-dot.active {
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+  animation: wsDotPulse 1.8s infinite ease-in-out;
+}
+
+.ws-dot.connecting {
+  background: #f59e0b;
+  animation: wsDotPulse 1s infinite ease-in-out;
+}
+
+.ws-dot.offline {
+  background: #94a3b8;
+}
+
+@keyframes wsDotPulse {
+  0% { transform: scale(0.9); opacity: 0.7; }
+  50% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(0.9); opacity: 0.7; }
+}
+
+.regia-header-controls .regia-btn.regia-btn-tv-ext {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(5, 150, 105, 0.35) 100%) !important;
+  border: 1px solid rgba(52, 211, 153, 0.5) !important;
+  color: #a7f3d0 !important;
+}
+
+.regia-header-controls .regia-btn.regia-btn-tv-ext:hover {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.4) 0%, rgba(5, 150, 105, 0.5) 100%) !important;
+  border-color: #34d399 !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.4) !important;
 }
 
 .regia-header-right {
@@ -4527,8 +4600,9 @@ nav > .box-id-badge {
   }
 
   .jumbo-grid .cartella-cell.winning-number {
-    background: #ea580c !important;
+    background: #16a34a !important;
     color: #ffffff !important;
+    border: 2px solid #ffffff !important;
     border-radius: 3px !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;

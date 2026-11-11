@@ -539,17 +539,37 @@ document.addEventListener('DOMContentLoaded', function() {
         showExtraWinPopup(tombolaCartellaId, premioExtra, currency);
         unclaimedGoldTotal = 0;
         updateUnclaimedPotDisplay();
+        if (window.TombolaSync) {
+            window.TombolaSync.broadcastUnclaimedUpdate(unclaimedGoldTotal);
+        }
     }
 
-    function assignUnclaimedPotToAllActiveCards() {
-        if (unclaimedGoldTotal <= 0) return;
-        const activeCartelle = generatedCartelle.filter(c => isCartellaActive(c.id));
-        if (activeCartelle.length === 0) return;
-        const currency = document.getElementById('currencySelect').value;
-        const premioPerCartella = unclaimedGoldTotal / activeCartelle.length;
-        showEndGameSplitPopup(activeCartelle, premioPerCartella, currency);
-        unclaimedGoldTotal = 0;
+    function handleGameEndWithoutTombola() {
+        // Se non ci sono vincite per la tombola, il premio NON deve essere ridistribuito.
+        // Deve andare direttamente nel montepremi non vinti!
+        const prizePool = parseFloat(document.getElementById('prizePool').value) || 0;
+        const currency = document.getElementById('currencySelect').value || '€';
+
+        if (!cartelleWins.tombola.won && !prizeDelaysConfig.tombola.expired) {
+            prizeDelaysConfig.tombola.expired = true;
+            const tombolaPrizeAmt = prizePool * (prizeDelaysConfig.tombola.potShare || 0.45);
+            unclaimedGoldTotal += tombolaPrizeAmt;
+            logRegiaEvent(`⚠️ Partita terminata senza Tombola: premio di ${currency} ${tombolaPrizeAmt.toFixed(2)} accantonato in Montepremi Non Vinti (NON ridistribuito).`, 'warn');
+        }
+
         updateUnclaimedPotDisplay();
+        syncRegiaUI();
+
+        if (window.TombolaSync) {
+            window.TombolaSync.broadcastUnclaimedUpdate(unclaimedGoldTotal);
+        }
+
+        showUnclaimedPreservedPopup();
+    }
+
+    // Compatibilità: reindirizza qualsiasi chiamata residua a non ridistribuire
+    function assignUnclaimedPotToAllActiveCards() {
+        handleGameEndWithoutTombola();
     }
 
     function showExtraWinPopup(cartellaId, premio, currency) {
@@ -573,7 +593,7 @@ document.addEventListener('DOMContentLoaded', function() {
         playSound('win');
     }
 
-    function showEndGameSplitPopup(activeCartelle, premioPerCartella, currency) {
+    function showUnclaimedPreservedPopup() {
         const popup = document.getElementById('winPopup');
         const title = document.getElementById('winPopupTitle');
         const details = document.getElementById('winPopupDetails');
@@ -582,13 +602,22 @@ document.addEventListener('DOMContentLoaded', function() {
         const winners = document.getElementById('winPopupWinners');
 
         if (!popup || !title || !details || !winNumbers || !cartellaIdElement || !winners) return;
+        const currency = document.getElementById('currencySelect').value || '€';
 
-        title.textContent = currentLanguage === 'it' ? 'MONTEPREMI NON VINTI DISTRIBUITO!' : 'UNCLAIMED PRIZE POOL DISTRIBUTED!';
-        details.textContent = currentLanguage === 'it' ? 'Il gioco è terminato senza Tombola. Il montepremi non vinto è stato suddiviso tra tutte le cartelle attive.' : 'The game ended without Tombola. The unclaimed prize pool has been split among all active cards.';
+        title.textContent = currentLanguage === 'it' ? 'PARTITA TERMINATA SENZA TOMBOLA' : 'GAME ENDED WITHOUT TOMBOLA';
+        details.innerHTML = currentLanguage === 'it'
+            ? `<div style="font-size: 14px; line-height: 1.6; color: #f8fafc;">
+                 Nessuna cartella ha realizzato la <b>Tombola</b>.<br>
+                 <span style="color: #facc15; font-weight: bold;">Il premio non viene ridistribuito</span>, ma è stato accantonato nel <b>Montepremi Non Vinti</b> per le prossime partite!
+               </div>`
+            : `<div style="font-size: 14px; line-height: 1.6; color: #f8fafc;">
+                 No card achieved <b>Tombola</b>.<br>
+                 <span style="color: #facc15; font-weight: bold;">The prize is not redistributed</span>; it has been saved to the <b>Unclaimed Prize Pool</b> for upcoming games!
+               </div>`;
         winNumbers.textContent = '';
         cartellaIdElement.style.display = 'none';
-        winners.innerHTML = `<div style="max-height: 150px; overflow-y: auto;">
-            ${activeCartelle.map(c => `<div>${c.id}: ${currency}${premioPerCartella.toFixed(2)}</div>`).join('')}
+        winners.innerHTML = `<div style="font-size: 16px; font-weight: 900; color: #22c55e; margin-top: 10px;">
+            ${currentLanguage === 'it' ? 'Saldo Attuale Montepremi Non Vinti:' : 'Current Unclaimed Pool:'} ${currency} ${unclaimedGoldTotal.toFixed(2)}
         </div>`;
 
         popup.style.display = 'flex';
@@ -1474,23 +1503,25 @@ document.addEventListener('DOMContentLoaded', function() {
                     cell.style.fontWeight = '900';
                     cell.style.boxShadow = '0 0 6px rgba(250, 204, 21, 0.6)';
                 } else if (winningNumbersByCartella[cartellaId] && winningNumbersByCartella[cartellaId].includes(number)) {
-                    // NUMERO VINCENTE
+                    // NUMERO VINCENTE: EVIDENZIATO IN VERDE (NON LAMPEGGIANTE)
                     cell.className = 'cartella-cell has-number winning-number';
-                    cell.style.background = '#ea580c';
+                    cell.style.background = '#16a34a';
                     cell.style.color = '#ffffff';
-                    cell.style.border = '1px solid #c2410c';
+                    cell.style.border = '2px solid #ffffff';
                     cell.style.borderRadius = '3px';
-                    cell.style.fontWeight = '900';
-                    cell.style.boxShadow = '0 0 6px rgba(234, 88, 12, 0.6)';
+                    cell.style.fontWeight = '950';
+                    cell.style.boxShadow = '0 0 10px rgba(22, 163, 74, 0.8)';
+                    cell.style.animation = 'none';
                 } else {
-                    // NUMERO ESTRATTO REGOLARE: MARCATO IN ROSSO (rettangolare, no cerchio)
+                    // NUMERO ESTRATTO REGOLARE (NON VINCENTE): RIMANE IN ROSSO
                     cell.className = 'cartella-cell has-number extracted';
                     cell.style.background = '#dc2626';
                     cell.style.color = '#ffffff';
                     cell.style.border = '1px solid #b91c1c';
                     cell.style.borderRadius = '3px';
                     cell.style.fontWeight = '900';
-                    cell.style.boxShadow = '0 0 4px rgba(220, 38, 38, 0.4)';
+                    cell.style.boxShadow = '0 0 4px rgba(220, 38, 38, 0.45)';
+                    cell.style.animation = 'none';
                 }
             } else {
                 // Cartella/striscia NON attiva oppure numero non estratto: NON MARCARE!
@@ -2404,7 +2435,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (extractedNumbers.length === 89) {
                 showTombolaPopup();
                 stopTimer();
-                assignUnclaimedPotToAllActiveCards();
+                handleGameEndWithoutTombola();
             }
             return;
         }
@@ -2458,7 +2489,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (extractedNumbers.length >= 90) {
             setTimeout(showTombolaPopup, 500);
             if (!cartelleWins.tombola.won) {
-                assignUnclaimedPotToAllActiveCards();
+                handleGameEndWithoutTombola();
             }
         }
 
