@@ -22,6 +22,8 @@ class TombolaRealtimeSyncService {
   private statusListeners: Set<(status: ConnectionStatus, clientCount: number) => void> = new Set();
   private connectedClientCount = 1;
   private isProcessingRemote = false;
+  private currentLatency = 0;
+  private latencyListeners: Set<(latency: number, quality: 'excellent' | 'good' | 'fair') => void> = new Set();
 
   constructor() {
     this.initBroadcastChannel();
@@ -92,13 +94,24 @@ class TombolaRealtimeSyncService {
     }
   }
 
+  private sendPing() {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        this.ws.send(JSON.stringify({ type: 'PING', clientTime: Date.now() }));
+      } catch (e) {
+        // Ignora errori di invio transitori
+      }
+    }
+  }
+
   private startHeartbeat() {
     this.stopHeartbeat();
+    // Invia subito primo ping di misurazione
+    this.sendPing();
+    // Aggiornamento frequente ogni 3.5 secondi per dare feedback immediato all'amministratore
     this.pingInterval = setInterval(() => {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: 'PING' }));
-      }
-    }, 25000);
+      this.sendPing();
+    }, 3500);
   }
 
   private stopHeartbeat() {
@@ -117,8 +130,79 @@ class TombolaRealtimeSyncService {
     }, delay);
   }
 
+  private updateQualityHUD(latency: number) {
+    if (typeof document === 'undefined') return;
+
+    // 1. Trigger animazione battito (Heartbeat beat)
+    const dot = document.getElementById('wsHeartbeatDot');
+    if (dot) {
+      dot.classList.remove('beat');
+      void dot.offsetWidth; // Forza reflow CSS
+      dot.classList.add('beat');
+    }
+
+    // 2. Classificazione della qualità: excellent (<60ms), good (<160ms), fair (>=160ms)
+    let quality: 'excellent' | 'good' | 'fair' = 'excellent';
+    if (latency >= 160) {
+      quality = 'fair';
+    } else if (latency >= 60) {
+      quality = 'good';
+    }
+
+    // 3. Aggiorna tacche segnale
+    const bars = document.getElementById('wsSignalBars');
+    if (bars) {
+      bars.className = `ws-signal-bars ${quality}`;
+    }
+
+    // 4. Aggiorna pillola latenza ms
+    const pill = document.getElementById('wsLatencyPill');
+    if (pill) {
+      pill.className = `ws-latency-pill ${quality}`;
+    }
+
+    const val = document.getElementById('wsLatencyVal');
+    if (val) {
+      val.textContent = `${latency} ms`;
+    }
+
+    // 5. Notifica ascoltatori
+    this.latencyListeners.forEach((cb) => {
+      try {
+        cb(latency, quality);
+      } catch (err) {
+        console.error(err);
+      }
+    });
+  }
+
+  private resetQualityHUD(status: ConnectionStatus) {
+    if (typeof document === 'undefined') return;
+    const bars = document.getElementById('wsSignalBars');
+    const pill = document.getElementById('wsLatencyPill');
+    const val = document.getElementById('wsLatencyVal');
+
+    if (status === 'connected') {
+      if (bars && !bars.classList.contains('excellent') && !bars.classList.contains('good')) {
+        bars.className = 'ws-signal-bars excellent';
+      }
+      if (pill && !pill.classList.contains('excellent') && !pill.classList.contains('good')) {
+        pill.className = 'ws-latency-pill excellent';
+      }
+    } else if (status === 'connecting') {
+      if (bars) bars.className = 'ws-signal-bars';
+      if (pill) pill.className = 'ws-latency-pill';
+      if (val) val.textContent = '... ms';
+    } else {
+      if (bars) bars.className = 'ws-signal-bars offline';
+      if (pill) pill.className = 'ws-latency-pill offline';
+      if (val) val.textContent = '-- ms';
+    }
+  }
+
   private setStatus(newStatus: ConnectionStatus) {
     this.status = newStatus;
+    this.resetQualityHUD(newStatus);
     this.statusListeners.forEach((cb) => {
       try {
         cb(newStatus, this.connectedClientCount);
@@ -137,7 +221,13 @@ class TombolaRealtimeSyncService {
       return;
     }
 
-    if (msg.type === 'PONG') return;
+    if (msg.type === 'PONG') {
+      const now = Date.now();
+      const latency = typeof msg.clientTime === 'number' ? Math.max(1, now - msg.clientTime) : 12;
+      this.currentLatency = latency;
+      this.updateQualityHUD(latency);
+      return;
+    }
 
     // Dispatche to registered handlers
     const handlers = this.listeners.get(msg.type);
@@ -289,6 +379,21 @@ class TombolaRealtimeSyncService {
 
   public getClientCount(): number {
     return this.connectedClientCount;
+  }
+
+  public getLatency(): number {
+    return this.currentLatency;
+  }
+
+  public onLatencyChange(callback: (latency: number, quality: 'excellent' | 'good' | 'fair') => void) {
+    this.latencyListeners.add(callback);
+    if (this.currentLatency > 0) {
+      let quality: 'excellent' | 'good' | 'fair' = 'excellent';
+      if (this.currentLatency >= 160) quality = 'fair';
+      else if (this.currentLatency >= 60) quality = 'good';
+      callback(this.currentLatency, quality);
+    }
+    return () => this.latencyListeners.delete(callback);
   }
 }
 

@@ -160,12 +160,19 @@
         <div class="regia-header-left">
             <div class="regia-live-badge"><span class="live-dot"></span> REGIA LIVE</div>
             <div class="regia-title">Console Regia & Controllo Gioco</div>
-            <div class="regia-game-tag" id="regiaGameTag">ID: TOM001 • v.15.15.0</div>
-            <div class="regia-ws-badge active" id="regiaWsBadge" title="Connessione WebSocket real-time attiva"><span class="ws-dot active"></span> <span id="regiaWsText">WS Live (1 schermo)</span></div>
+            <div class="regia-ws-badge active" id="regiaWsBadge" title="Stato e Qualità Collegamento WebSocket Real-Time">
+                <span class="ws-heartbeat-dot" id="wsHeartbeatDot"></span>
+                <span class="ws-signal-bars" id="wsSignalBars" title="Intensità del segnale WebSocket">
+                    <span class="bar bar-1 active"></span>
+                    <span class="bar bar-2 active"></span>
+                    <span class="bar bar-3 active"></span>
+                </span>
+                <span class="ws-status-text" id="regiaWsText">WS Live (1 schermo)</span>
+                <span class="ws-latency-pill excellent" id="wsLatencyPill" title="Latenza di rete istantanea"><i class="fas fa-bolt"></i> <span id="wsLatencyVal">-- ms</span></span>
+            </div>
         </div>
         <div class="regia-header-center">
             <div class="regia-clock" id="regiaClock">00:00:00</div>
-            <div class="regia-status-badge" id="regiaStatusBadge">Partita Pronta</div>
         </div>
         <div class="regia-header-controls">
             <button class="regia-btn regia-btn-tv-ext" id="regiaOpenTvExtBtn" title="Apri visualizzazione Schermo TV in un secondo monitor o finestra"><i class="fas fa-external-link-alt"></i> <span>Apri TV Studio (2° Monitor)</span></button>
@@ -696,7 +703,6 @@
         <a href="#" id="navHomeLink"><i class="fas fa-home"></i> <span id="nav-home">Home</span></a>
         <a href="#" id="navCartelleLink"><i class="fas fa-ticket-alt"></i> <span id="nav-cards">Cartelle</span></a>
         <a href="#" id="navRegiaLink" class="nav-regia-btn"><i class="fas fa-sliders-h"></i> <span id="nav-regia">Regia</span></a>
-        <a href="#" id="tombolaItalia" class="tombola-option"><i class="fas fa-flag"></i> <span id="tombola-italia-text">Tombola Italia</span></a>
     </div>
     <div class="nav-options">
         <div class="nav-extra-buttons">

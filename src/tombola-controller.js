@@ -4677,13 +4677,13 @@ function startTombolaApp() {
             if (badge && txt) {
                 if (status === 'connected') {
                     badge.className = 'regia-ws-badge active';
-                    txt.innerHTML = `<span class="ws-dot active"></span> WS Live (${clientCount} ${clientCount === 1 ? 'schermo' : 'schermi'})`;
+                    txt.textContent = `WS Live (${clientCount} ${clientCount === 1 ? 'schermo' : 'schermi'})`;
                 } else if (status === 'connecting') {
                     badge.className = 'regia-ws-badge connecting';
-                    txt.innerHTML = `<span class="ws-dot connecting"></span> Connessione WS...`;
+                    txt.textContent = `Connessione WS...`;
                 } else {
                     badge.className = 'regia-ws-badge offline';
-                    txt.innerHTML = `<span class="ws-dot offline"></span> WS Locale (BroadcastChannel)`;
+                    txt.textContent = `WS Locale (BroadcastChannel)`;
                 }
             }
         });

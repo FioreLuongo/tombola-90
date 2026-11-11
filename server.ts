@@ -112,7 +112,7 @@ wss.on('connection', (ws: WebSocket, req) => {
 
       switch (msg.type) {
         case 'PING':
-          ws.send(JSON.stringify({ type: 'PONG', timestamp: Date.now() }));
+          ws.send(JSON.stringify({ type: 'PONG', clientTime: msg.clientTime, serverTime: Date.now() }));
           break;
 
         case 'REGIA_EXTRACT': {
