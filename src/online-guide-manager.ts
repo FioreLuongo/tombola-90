@@ -111,8 +111,9 @@ export function downloadOnlineGuidePDF(e?: Event) {
   } catch (error) {
     console.error('Errore generazione Blob PDF:', error);
     // Fallback diretto al file statico su disco
+    const baseUrl = import.meta.env.BASE_URL || '/';
     const fallbackLink = document.createElement('a');
-    fallbackLink.href = '/Guida_Messa_Online_GitHub_Hosting.pdf';
+    fallbackLink.href = `${baseUrl}Guida_Messa_Online_GitHub_Hosting.pdf`;
     fallbackLink.download = 'Guida_Messa_Online_GitHub_Hosting.pdf';
     fallbackLink.target = '_self';
     document.body.appendChild(fallbackLink);
@@ -137,10 +138,11 @@ export async function downloadProjectZip(e?: Event) {
     '#f59e0b'
   );
 
+  const baseUrl = import.meta.env.BASE_URL || '/';
   try {
-    let response = await fetch('/tombola-90-complete.zip');
+    let response = await fetch(`${baseUrl}tombola-90-complete.zip`);
     if (!response.ok) {
-      response = await fetch('/luongo-tombola-90-complete.zip');
+      response = await fetch(`${baseUrl}luongo-tombola-90-complete.zip`);
     }
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -168,7 +170,7 @@ export async function downloadProjectZip(e?: Event) {
   } catch (error) {
     console.warn('Fallback download ZIP diretto:', error);
     const link = document.createElement('a');
-    link.href = '/tombola-90-complete.zip';
+    link.href = `${baseUrl}tombola-90-complete.zip`;
     link.download = 'tombola-90-complete.zip';
     document.body.appendChild(link);
     link.click();

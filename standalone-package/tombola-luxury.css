@@ -3175,10 +3175,13 @@ nav > .box-id-badge {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  row-gap: 8px;
+  column-gap: 10px;
   background: var(--card-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  padding: 10px 18px;
+  padding: 10px 14px;
   border-radius: var(--border-radius);
   border: 1px solid rgba(212, 175, 55, 0.4);
   box-shadow: var(--card-shadow);
@@ -3188,18 +3191,23 @@ nav > .box-id-badge {
 .regia-header-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .regia-title {
-  font-size: 18px;
+  font-size: 13px;
   font-weight: 900;
+  line-height: 1.15;
   color: #f3e5ab;
   text-transform: uppercase;
-  letter-spacing: 1.2px;
+  letter-spacing: 0.6px;
   display: flex;
   align-items: center;
   gap: 8px;
+  max-width: 170px;
+  white-space: normal;
 }
 
 .regia-live-badge {
@@ -3469,9 +3477,10 @@ nav > .box-id-badge {
   display: flex !important;
   flex-direction: row !important;
   align-items: center !important;
-  gap: 8px !important;
-  flex-wrap: nowrap !important;
-  flex-shrink: 0 !important;
+  justify-content: flex-end !important;
+  gap: 6px !important;
+  flex-wrap: wrap !important;
+  flex: 1 1 auto !important;
 }
 
 .regia-header-controls .regia-btn {
@@ -3479,14 +3488,14 @@ nav > .box-id-badge {
   flex-direction: row !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 7px !important;
-  padding: 7px 14px !important;
-  font-size: 11px !important;
+  gap: 5px !important;
+  padding: 6px 10px !important;
+  font-size: 10.5px !important;
   font-weight: 800 !important;
   white-space: nowrap !important;
   border-radius: 6px !important;
   text-transform: uppercase !important;
-  letter-spacing: 0.4px !important;
+  letter-spacing: 0.3px !important;
   cursor: pointer !important;
   transition: all 0.2s ease !important;
   border: 1px solid rgba(255, 255, 255, 0.2) !important;
