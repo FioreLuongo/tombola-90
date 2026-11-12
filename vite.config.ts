@@ -4,8 +4,12 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  const configuredHostingUrl = process.env.VITE_APP_URL || process.env.APP_URL || '';
   return {
     base: process.env.VITE_BASE_PATH || '/',
+    define: {
+      __APP_HOSTING_URL__: JSON.stringify(configuredHostingUrl),
+    },
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

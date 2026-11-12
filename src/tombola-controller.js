@@ -4648,8 +4648,8 @@ function startTombolaApp() {
             }
         });
 
-        // 9. Ricezione stato iniziale completo (se la TV si connette a partita già iniziata)
-        window.TombolaSync.on('STATE_INIT', (data) => {
+        // 9. Ricezione stato iniziale / completo (se la TV si connette a partita già iniziata)
+        const applyRemoteGameState = (data) => {
             if (data && data.state) {
                 const st = data.state;
                 if (st.unclaimedPot !== undefined && st.unclaimedPot > 0 && unclaimedGoldTotal === 0) {
@@ -4668,7 +4668,9 @@ function startTombolaApp() {
                     applyTvGraphicState();
                 }
             }
-        });
+        };
+        window.TombolaSync.on('STATE_INIT', applyRemoteGameState);
+        window.TombolaSync.on('FULL_STATE_SYNC', applyRemoteGameState);
 
         // 10. Aggiorna badge stato WebSocket in console Regia
         window.TombolaSync.onStatusChange((status, clientCount) => {
@@ -4692,8 +4694,14 @@ function startTombolaApp() {
         const openTvExtBtn = document.getElementById('regiaOpenTvExtBtn');
         if (openTvExtBtn) {
             openTvExtBtn.addEventListener('click', () => {
-                const tvUrl = `${window.location.origin}${window.location.pathname}?view=tv`;
-                window.open(tvUrl, 'Tombola90TvStudio', 'width=1920,height=1080,menubar=no,toolbar=no,location=no,status=no');
+                const tvUrlObj = new URL(`${window.location.origin}${window.location.pathname}`);
+                tvUrlObj.searchParams.set('view', 'tv');
+                const currentParams = new URLSearchParams(window.location.search);
+                const explicitWs = currentParams.get('ws') || currentParams.get('wsUrl');
+                if (explicitWs) {
+                    tvUrlObj.searchParams.set('ws', explicitWs);
+                }
+                window.open(tvUrlObj.toString(), 'Tombola90TvStudio', 'width=1920,height=1080,menubar=no,toolbar=no,location=no,status=no');
                 logRegiaEvent('Aperta finestra TV Studio su secondo monitor/finestra.', 'info');
             });
         }

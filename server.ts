@@ -111,6 +111,10 @@ wss.on('connection', (ws: WebSocket, req) => {
       const msg = JSON.parse(data.toString());
 
       switch (msg.type) {
+        case 'REGISTER_CLIENT':
+          console.log(`[WebSocket] Client registrato come ruolo: ${msg.role || 'client'}`);
+          break;
+
         case 'PING':
           ws.send(JSON.stringify({ type: 'PONG', clientTime: msg.clientTime, serverTime: Date.now() }));
           break;

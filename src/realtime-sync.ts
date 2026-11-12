@@ -1,6 +1,7 @@
 /**
- * Tombola-90 Real-Time WebSocket & BroadcastChannel Synchronization Service
- * Sincronizza istantaneamente la Console Regia e lo Schermo TV Studio senza ricaricare la pagina.
+ * Tombola-90 Real-Time Synchronization Bus
+ * Ponte eventi condiviso tra la Console Regia, lo Schermo TV Studio e ClientWebSocketManager (src/main.ts).
+ * Mantiene una singola connessione WebSocket gestita centralmente da ClientWebSocketManager.
  */
 
 export interface RealtimeMessage {
@@ -10,14 +11,28 @@ export interface RealtimeMessage {
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
+export interface RealtimeTransport {
+  send: (msg: RealtimeMessage) => void;
+  connect?: () => void;
+  getStatus: () => ConnectionStatus;
+  getClientCount: () => number;
+  getLatency: () => number;
+}
+
+const BROADCAST_TO_EVENT_ALIAS: Record<string, string> = {
+  REGIA_EXTRACT: 'NUMBER_EXTRACTED',
+  REGIA_START_TIMER: 'TIMER_STARTED',
+  REGIA_PAUSE_TIMER: 'TIMER_PAUSED',
+  REGIA_RESET_GAME: 'GAME_RESET',
+  UPDATE_UNCLAIMED: 'UNCLAIMED_UPDATED',
+  UPDATE_PRIZE_POOL: 'PRIZE_POOL_UPDATED',
+  UPDATE_GRAPHICS: 'GRAPHICS_UPDATED',
+  SYNC_FULL_STATE: 'FULL_STATE_SYNC',
+};
+
 class TombolaRealtimeSyncService {
-  private ws: WebSocket | null = null;
-  private broadcastChannel: BroadcastChannel | null = null;
+  private transport: RealtimeTransport | null = null;
   private status: ConnectionStatus = 'disconnected';
-  private reconnectTimer: any = null;
-  private pingInterval: any = null;
-  private reconnectAttempts = 0;
-  private maxReconnectDelay = 8000;
   private listeners: Map<string, Set<(data: any) => void>> = new Map();
   private statusListeners: Set<(status: ConnectionStatus, clientCount: number) => void> = new Set();
   private connectedClientCount = 1;
@@ -25,249 +40,96 @@ class TombolaRealtimeSyncService {
   private currentLatency = 0;
   private latencyListeners: Set<(latency: number, quality: 'excellent' | 'good' | 'fair') => void> = new Set();
 
-  constructor() {
-    this.initBroadcastChannel();
-    this.connect();
-  }
-
-  private initBroadcastChannel() {
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-      try {
-        this.broadcastChannel = new BroadcastChannel('tombola90_realtime_channel');
-        this.broadcastChannel.onmessage = (event) => {
-          if (event && event.data) {
-            this.handleIncomingMessage(event.data, 'broadcast_channel');
-          }
-        };
-      } catch (err) {
-        console.warn('[RealtimeSync] BroadcastChannel non supportato o bloccato:', err);
-      }
+  public bindTransport(transport: RealtimeTransport) {
+    this.transport = transport;
+    this.status = transport.getStatus();
+    this.connectedClientCount = transport.getClientCount();
+    this.currentLatency = transport.getLatency();
+    this.emitStatus(this.status, this.connectedClientCount);
+    if (this.currentLatency > 0) {
+      this.emitLatency(this.currentLatency);
     }
   }
 
   public connect() {
-    if (typeof window === 'undefined') return;
-
-    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
-      return;
-    }
-
-    this.setStatus('connecting');
-
-    try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.host;
-      const wsUrl = `${protocol}//${host}/ws`;
-
-      this.ws = new WebSocket(wsUrl);
-
-      this.ws.onopen = () => {
-        console.log('[RealtimeSync] ⚡ Connessione WebSocket attiva con il server!');
-        this.reconnectAttempts = 0;
-        this.setStatus('connected');
-        this.startHeartbeat();
-      };
-
-      this.ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          this.handleIncomingMessage(data, 'websocket');
-        } catch (err) {
-          console.error('[RealtimeSync] Errore parsing messaggio WS:', err);
-        }
-      };
-
-      this.ws.onclose = () => {
-        this.stopHeartbeat();
-        this.setStatus('disconnected');
-        this.scheduleReconnect();
-      };
-
-      this.ws.onerror = (err) => {
-        console.warn('[RealtimeSync] Avviso connessione WebSocket (attivo fallback locale):', err);
-        this.setStatus('error');
-      };
-    } catch (e) {
-      console.warn('[RealtimeSync] Impossibile avviare WebSocket:', e);
-      this.setStatus('disconnected');
-      this.scheduleReconnect();
-    }
+    this.transport?.connect?.();
   }
 
-  private sendPing() {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+  public notifyStatus(newStatus: ConnectionStatus, clientCount?: number) {
+    this.status = newStatus;
+    if (typeof clientCount === 'number') {
+      this.connectedClientCount = clientCount;
+    }
+    this.emitStatus(this.status, this.connectedClientCount);
+  }
+
+  public notifyLatency(latency: number) {
+    this.currentLatency = latency;
+    this.emitLatency(latency);
+  }
+
+  private emitStatus(status: ConnectionStatus, clientCount: number) {
+    this.statusListeners.forEach((cb) => {
       try {
-        this.ws.send(JSON.stringify({ type: 'PING', clientTime: Date.now() }));
+        cb(status, clientCount);
       } catch (e) {
-        // Ignora errori di invio transitori
+        console.error('[RealtimeSync] Errore status listener:', e);
       }
-    }
+    });
   }
 
-  private startHeartbeat() {
-    this.stopHeartbeat();
-    // Invia subito primo ping di misurazione
-    this.sendPing();
-    // Aggiornamento frequente ogni 3.5 secondi per dare feedback immediato all'amministratore
-    this.pingInterval = setInterval(() => {
-      this.sendPing();
-    }, 3500);
-  }
-
-  private stopHeartbeat() {
-    if (this.pingInterval) {
-      clearInterval(this.pingInterval);
-      this.pingInterval = null;
-    }
-  }
-
-  private scheduleReconnect() {
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), this.maxReconnectDelay);
-    this.reconnectAttempts++;
-    this.reconnectTimer = setTimeout(() => {
-      this.connect();
-    }, delay);
-  }
-
-  private updateQualityHUD(latency: number) {
-    if (typeof document === 'undefined') return;
-
-    // 1. Trigger animazione battito (Heartbeat beat)
-    const dot = document.getElementById('wsHeartbeatDot');
-    if (dot) {
-      dot.classList.remove('beat');
-      void dot.offsetWidth; // Forza reflow CSS
-      dot.classList.add('beat');
-    }
-
-    // 2. Classificazione della qualità: excellent (<60ms), good (<160ms), fair (>=160ms)
+  private emitLatency(latency: number) {
     let quality: 'excellent' | 'good' | 'fair' = 'excellent';
-    if (latency >= 160) {
-      quality = 'fair';
-    } else if (latency >= 60) {
-      quality = 'good';
-    }
+    if (latency >= 160) quality = 'fair';
+    else if (latency >= 60) quality = 'good';
 
-    // 3. Aggiorna tacche segnale
-    const bars = document.getElementById('wsSignalBars');
-    if (bars) {
-      bars.className = `ws-signal-bars ${quality}`;
-    }
-
-    // 4. Aggiorna pillola latenza ms
-    const pill = document.getElementById('wsLatencyPill');
-    if (pill) {
-      pill.className = `ws-latency-pill ${quality}`;
-    }
-
-    const val = document.getElementById('wsLatencyVal');
-    if (val) {
-      val.textContent = `${latency} ms`;
-    }
-
-    // 5. Notifica ascoltatori
     this.latencyListeners.forEach((cb) => {
       try {
         cb(latency, quality);
       } catch (err) {
-        console.error(err);
+        console.error('[RealtimeSync] Errore latency listener:', err);
       }
     });
   }
 
-  private resetQualityHUD(status: ConnectionStatus) {
-    if (typeof document === 'undefined') return;
-    const bars = document.getElementById('wsSignalBars');
-    const pill = document.getElementById('wsLatencyPill');
-    const val = document.getElementById('wsLatencyVal');
-
-    if (status === 'connected') {
-      if (bars && !bars.classList.contains('excellent') && !bars.classList.contains('good')) {
-        bars.className = 'ws-signal-bars excellent';
-      }
-      if (pill && !pill.classList.contains('excellent') && !pill.classList.contains('good')) {
-        pill.className = 'ws-latency-pill excellent';
-      }
-    } else if (status === 'connecting') {
-      if (bars) bars.className = 'ws-signal-bars';
-      if (pill) pill.className = 'ws-latency-pill';
-      if (val) val.textContent = '... ms';
-    } else {
-      if (bars) bars.className = 'ws-signal-bars offline';
-      if (pill) pill.className = 'ws-latency-pill offline';
-      if (val) val.textContent = '-- ms';
-    }
+  public hasListeners(type: string): boolean {
+    const direct = this.listeners.get(type);
+    return Boolean(direct && direct.size > 0);
   }
 
-  private setStatus(newStatus: ConnectionStatus) {
-    this.status = newStatus;
-    this.resetQualityHUD(newStatus);
-    this.statusListeners.forEach((cb) => {
-      try {
-        cb(newStatus, this.connectedClientCount);
-      } catch (e) {
-        console.error(e);
-      }
-    });
-  }
+  public dispatchIncomingMessage(msg: RealtimeMessage, origin: 'websocket' | 'broadcast_channel' = 'websocket'): boolean {
+    if (!msg || !msg.type) return false;
 
-  private handleIncomingMessage(msg: RealtimeMessage, origin: string) {
-    if (!msg || !msg.type) return;
+    const mappedType = origin === 'broadcast_channel' && BROADCAST_TO_EVENT_ALIAS[msg.type]
+      ? BROADCAST_TO_EVENT_ALIAS[msg.type]
+      : msg.type;
 
-    if (msg.type === 'CLIENT_COUNT' && typeof msg.count === 'number') {
-      this.connectedClientCount = msg.count;
-      this.setStatus(this.status);
-      return;
+    const normalizedMsg = mappedType !== msg.type ? { ...msg, type: mappedType } : msg;
+    const handlers = this.listeners.get(mappedType);
+
+    if (!handlers || handlers.size === 0) {
+      return false;
     }
 
-    if (msg.type === 'PONG') {
-      const now = Date.now();
-      const latency = typeof msg.clientTime === 'number' ? Math.max(1, now - msg.clientTime) : 12;
-      this.currentLatency = latency;
-      this.updateQualityHUD(latency);
-      return;
+    this.isProcessingRemote = true;
+    try {
+      handlers.forEach((handler) => {
+        try {
+          handler(normalizedMsg);
+        } catch (err) {
+          console.error(`[RealtimeSync] Errore listener ${mappedType}:`, err);
+        }
+      });
+    } finally {
+      this.isProcessingRemote = false;
     }
-
-    // Dispatche to registered handlers
-    const handlers = this.listeners.get(msg.type);
-    if (handlers) {
-      this.isProcessingRemote = true;
-      try {
-        handlers.forEach((handler) => {
-          try {
-            handler(msg);
-          } catch (err) {
-            console.error(`[RealtimeSync] Errore listener ${msg.type}:`, err);
-          }
-        });
-      } finally {
-        this.isProcessingRemote = false;
-      }
-    }
+    return true;
   }
 
   public send(msg: RealtimeMessage) {
-    if (this.isProcessingRemote) return; // Prevent loops
-
-    const payload = JSON.stringify(msg);
-
-    // 1. Send via WebSocket to remote server
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      try {
-        this.ws.send(payload);
-      } catch (err) {
-        console.warn('[RealtimeSync] Invio WS fallito:', err);
-      }
-    }
-
-    // 2. Also send via BroadcastChannel for zero-latency local multi-tab / 2nd screen
-    if (this.broadcastChannel) {
-      try {
-        this.broadcastChannel.postMessage(msg);
-      } catch (err) {
-        console.warn('[RealtimeSync] Invio BroadcastChannel fallito:', err);
-      }
+    if (this.isProcessingRemote) return;
+    if (this.transport) {
+      this.transport.send(msg);
     }
   }
 
@@ -368,7 +230,6 @@ class TombolaRealtimeSyncService {
 
   public onStatusChange(callback: (status: ConnectionStatus, clientCount: number) => void) {
     this.statusListeners.add(callback);
-    // Emit immediate current status
     callback(this.status, this.connectedClientCount);
     return () => this.statusListeners.delete(callback);
   }

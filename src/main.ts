@@ -1,18 +1,23 @@
 import './tombola-luxury.css';
 import * as jackpotService from './firebase-jackpot-service';
 (window as any).JackpotService = jackpotService;
-import './realtime-sync';
+import { realtimeSync, type ConnectionStatus, type RealtimeMessage } from './realtime-sync';
 import './tombola-controller.js';
 import './online-guide-manager';
+import { resolveWebSocketUrl } from './utils/ws-url';
 
 /**
  * ============================================================================
- * GESTORE WEBSOCKET LATO CLIENT (TV STUDIO & TABELLONE LIVE)
+ * GESTORE CONNESSIONE WEBSOCKET IN TEMPO REALE (REGIA <-> SCHERMO TV)
  * ============================================================================
- * Ascolta in tempo reale gli eventi di estrazione trasmessi dalla Console Regia
- * e aggiorna istantaneamente il tabellone a 90 numeri, i contatori di gioco,
- * la Smorfia e la visualizzazione senza ricaricare la pagina.
+ * Unifica la connessione WebSocket + BroadcastChannel per sincronizzare
+ * istantaneamente il tabellone a 90 numeri, le cartelle, i contatori e le vincite
+ * tra la Console Regia e lo Schermo TV Studio utilizzando l'URL di hosting
+ * configurato (VITE_WS_URL, VITE_APP_URL, APP_URL, ?ws=, o window.location).
  */
+
+const CUSTOM_WS_STORAGE_KEY = 'tombola90_ws_url';
+const BROADCAST_CHANNEL_NAME = 'tombola90_realtime_channel';
 
 interface ExtractionPayload {
   type: string;
@@ -26,11 +31,16 @@ interface ExtractionPayload {
 
 class ClientWebSocketManager {
   private ws: WebSocket | null = null;
-  private reconnectTimeout: any = null;
-  private pingInterval: any = null;
+  private broadcastChannel: BroadcastChannel | null = null;
+  private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  private pingInterval: ReturnType<typeof setInterval> | null = null;
   private isConnecting = false;
   private reconnectAttempts = 0;
   private readonly maxReconnectDelay = 8000;
+  private currentWsUrl: string | null = null;
+  private status: ConnectionStatus = 'disconnected';
+  private connectedClientCount = 1;
+  private currentLatency = 0;
 
   constructor() {
     this.init();
@@ -39,7 +49,9 @@ class ClientWebSocketManager {
   private init() {
     if (typeof window === 'undefined') return;
 
-    // Connetti WebSocket quando la pagina è pronta
+    this.initBroadcastChannel();
+    this.bindRealtimeBus();
+
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => this.connect());
     } else {
@@ -47,66 +59,234 @@ class ClientWebSocketManager {
     }
   }
 
+  private bindRealtimeBus() {
+    realtimeSync.bindTransport({
+      send: (msg: RealtimeMessage) => this.send(msg),
+      connect: () => this.connect(),
+      getStatus: () => this.status,
+      getClientCount: () => this.connectedClientCount,
+      getLatency: () => this.currentLatency,
+    });
+  }
+
+  private initBroadcastChannel() {
+    if (typeof window === 'undefined' || !('BroadcastChannel' in window)) return;
+    try {
+      this.broadcastChannel = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
+      this.broadcastChannel.onmessage = (event: MessageEvent) => {
+        if (event?.data) {
+          this.handleIncomingData(event.data, 'broadcast_channel');
+        }
+      };
+    } catch (err) {
+      console.warn('[WS-Client] BroadcastChannel non disponibile:', err);
+    }
+  }
+
+  private getConfiguredHostingUrl(): string {
+    const fromViteApp = typeof import.meta !== 'undefined' && import.meta.env?.VITE_APP_URL
+      ? import.meta.env.VITE_APP_URL
+      : '';
+    const fromDefine = typeof __APP_HOSTING_URL__ !== 'undefined' ? __APP_HOSTING_URL__ : '';
+    return fromViteApp || fromDefine || '';
+  }
+
+  public resolveTargetWsUrl(): string | null {
+    if (typeof window === 'undefined') return null;
+
+    let storedWsUrl: string | null = null;
+    try {
+      storedWsUrl = window.localStorage.getItem(CUSTOM_WS_STORAGE_KEY);
+    } catch {
+      storedWsUrl = null;
+    }
+
+    const viteWsUrl = typeof import.meta !== 'undefined' ? import.meta.env?.VITE_WS_URL : undefined;
+    const viteAppUrl = typeof import.meta !== 'undefined' ? import.meta.env?.VITE_APP_URL : undefined;
+    const configuredAppUrl = typeof __APP_HOSTING_URL__ !== 'undefined' ? __APP_HOSTING_URL__ : undefined;
+
+    return resolveWebSocketUrl({
+      search: window.location.search,
+      storedWsUrl,
+      viteWsUrl,
+      viteAppUrl,
+      configuredAppUrl,
+      windowProtocol: window.location.protocol,
+      windowHost: window.location.host,
+      windowHostname: window.location.hostname,
+    });
+  }
+
+  public getWsUrl(): string | null {
+    return this.currentWsUrl || this.resolveTargetWsUrl();
+  }
+
+  public getHostingUrl(): string {
+    return this.getConfiguredHostingUrl() || (typeof window !== 'undefined' ? window.location.origin : '');
+  }
+
+  public getClientRole(): 'tv' | 'regia' {
+    if (typeof window === 'undefined') return 'regia';
+    const params = new URLSearchParams(window.location.search);
+    return params.get('view') === 'tv' || params.get('mode') === 'tv' ? 'tv' : 'regia';
+  }
+
+  public setCustomWsUrl(customUrl: string | null) {
+    if (typeof window === 'undefined') return;
+    try {
+      if (customUrl && customUrl.trim()) {
+        window.localStorage.setItem(CUSTOM_WS_STORAGE_KEY, customUrl.trim());
+      } else {
+        window.localStorage.removeItem(CUSTOM_WS_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore storage failures
+    }
+    this.reconnectAttempts = 0;
+    this.disconnect();
+    this.connect();
+  }
+
+  public disconnect() {
+    this.stopHeartbeat();
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+    if (this.ws) {
+      try {
+        this.ws.onclose = null;
+        this.ws.close();
+      } catch {
+        // Ignore close errors
+      }
+      this.ws = null;
+    }
+    this.isConnecting = false;
+  }
+
   public connect() {
+    if (typeof window === 'undefined') return;
     if (this.isConnecting || (this.ws && this.ws.readyState === WebSocket.OPEN)) {
       return;
     }
 
+    const wsUrl = this.resolveTargetWsUrl();
+    this.currentWsUrl = wsUrl;
+
+    if (!wsUrl) {
+      this.status = 'disconnected';
+      this.updateWsBadge('offline', 'WS Locale (BroadcastChannel)');
+      realtimeSync.notifyStatus('disconnected', this.connectedClientCount);
+      console.info('[WS-Client] Nessun endpoint WebSocket remoto configurato: attivo sync locale via BroadcastChannel.');
+      return;
+    }
+
     this.isConnecting = true;
+    this.status = 'connecting';
     this.updateWsBadge('connecting', 'Connessione WS...');
+    realtimeSync.notifyStatus('connecting', this.connectedClientCount);
 
     try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      console.log(`[WS-Client] Connessione real-time (${this.getClientRole()}) a ${wsUrl}...`);
+      const socket = new WebSocket(wsUrl);
+      this.ws = socket;
 
-      console.log(`[WS-Client] Connessione a ${wsUrl}...`);
-      this.ws = new WebSocket(wsUrl);
-
-      this.ws.onopen = () => {
+      socket.onopen = () => {
+        if (this.ws !== socket) return;
         this.isConnecting = false;
         this.reconnectAttempts = 0;
-        console.log('⚡ [WS-Client] Connesso con successo al server WebSocket!');
-        this.updateWsBadge('active', 'WS Live (TV Connessa)');
+        this.status = 'connected';
+
+        console.log(`⚡ [WS-Client] Connesso con successo a ${wsUrl}`);
+        this.updateWsBadge('active', `WS Live (${this.connectedClientCount} ${this.connectedClientCount === 1 ? 'schermo' : 'schermi'})`);
+        realtimeSync.notifyStatus('connected', this.connectedClientCount);
+
+        // Registra il ruolo (Regia o TV Studio) e l'URL di hosting
+        this.sendWsOnly({
+          type: 'REGISTER_CLIENT',
+          role: this.getClientRole(),
+          hostingUrl: this.getHostingUrl(),
+          timestamp: Date.now(),
+        });
+
         this.startHeartbeat();
       };
 
-      this.ws.onmessage = (event: MessageEvent) => {
+      socket.onmessage = (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
-          this.handleServerMessage(data);
+          this.handleIncomingData(data, 'websocket');
         } catch (err) {
-          console.error('[WS-Client] Errore parsing messaggio:', err);
+          console.error('[WS-Client] Errore parsing messaggio WebSocket:', err);
         }
       };
 
-      this.ws.onclose = () => {
+      socket.onclose = () => {
+        if (this.ws !== socket) return;
         this.isConnecting = false;
+        this.ws = null;
         this.stopHeartbeat();
-        console.warn('[WS-Client] Connessione chiusa. Tentativo di riconnessione...');
+        this.status = 'disconnected';
+        console.warn('[WS-Client] Connessione WebSocket chiusa. Riconnessione programmata...');
         this.updateWsBadge('offline', 'WS In Riconnessione...');
+        realtimeSync.notifyStatus('disconnected', this.connectedClientCount);
         this.scheduleReconnect();
       };
 
-      this.ws.onerror = (err) => {
+      socket.onerror = (err) => {
+        if (this.ws !== socket) return;
         this.isConnecting = false;
-        console.warn('[WS-Client] Errore socket (attivo fallback locale):', err);
-        this.updateWsBadge('offline', 'WS Offline (Locale)');
+        this.status = 'error';
+        console.warn('[WS-Client] Errore socket (attivo fallback BroadcastChannel):', err);
+        this.updateWsBadge('offline', 'WS Locale (Fallback)');
+        realtimeSync.notifyStatus('error', this.connectedClientCount);
       };
     } catch (e) {
       this.isConnecting = false;
+      this.status = 'disconnected';
+      realtimeSync.notifyStatus('disconnected', this.connectedClientCount);
       this.scheduleReconnect();
     }
+  }
+
+  private sendWsOnly(msg: RealtimeMessage) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        this.ws.send(JSON.stringify(msg));
+      } catch (err) {
+        console.warn('[WS-Client] Errore invio WebSocket:', err);
+      }
+    }
+  }
+
+  public send(msg: RealtimeMessage) {
+    this.sendWsOnly(msg);
+
+    if (this.broadcastChannel) {
+      try {
+        this.broadcastChannel.postMessage(msg);
+      } catch (err) {
+        console.warn('[WS-Client] Errore invio BroadcastChannel:', err);
+      }
+    }
+  }
+
+  public syncBoardExtraction(number: number, smorfia: string = '') {
+    this.send({
+      type: 'REGIA_EXTRACT',
+      number,
+      smorfia,
+      source: this.getClientRole(),
+      timestamp: Date.now(),
+    });
   }
 
   private startHeartbeat() {
     this.stopHeartbeat();
     const sendPing = () => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        try {
-          this.ws.send(JSON.stringify({ type: 'PING', clientTime: Date.now() }));
-        } catch (e) {
-          // ignore
-        }
+        this.sendWsOnly({ type: 'PING', clientTime: Date.now() });
       }
     };
     sendPing();
@@ -129,97 +309,103 @@ class ClientWebSocketManager {
     }, delay);
   }
 
-  /**
-   * Smistamento eventi in tempo reale inviati dalla Regia
-   */
-  private handleServerMessage(data: any) {
+  private handleIncomingData(data: any, origin: 'websocket' | 'broadcast_channel') {
     if (!data || !data.type) return;
 
+    if (data.type === 'CLIENT_COUNT') {
+      if (typeof data.count === 'number') {
+        this.connectedClientCount = data.count;
+        const badgeLabel = `WS Live (${data.count} ${data.count === 1 ? 'schermo' : 'schermi'})`;
+        this.updateWsBadge(this.status === 'connected' ? 'active' : 'connecting', badgeLabel);
+        realtimeSync.notifyStatus(this.status, data.count);
+      }
+      return;
+    }
+
+    if (data.type === 'PONG') {
+      const latency = typeof data.clientTime === 'number' ? Math.max(1, Date.now() - data.clientTime) : 12;
+      this.currentLatency = latency;
+      this.updateLatencyUI(latency);
+      realtimeSync.notifyLatency(latency);
+      return;
+    }
+
+    // Inoltra al controller di gioco tramite il bus TombolaSync
+    const handledByController = realtimeSync.dispatchIncomingMessage(data, origin);
+
+    // Sincronizzazione diretta del tabellone e stato HUD
     switch (data.type) {
-      // 1. Estrazione Numero da Regia
       case 'NUMBER_EXTRACTED':
       case 'REGIA_EXTRACT':
-        this.handleExtractionEvent(data);
+        if (!handledByController) {
+          this.handleExtractionEvent(data);
+        }
         break;
 
-      // 2. Timer avviato
       case 'TIMER_STARTED':
       case 'REGIA_START_TIMER':
         this.handleTimerStatus(true);
         break;
 
-      // 3. Timer in pausa
       case 'TIMER_PAUSED':
       case 'REGIA_PAUSE_TIMER':
         this.handleTimerStatus(false);
         break;
 
-      // 4. Reset Partita da Regia
       case 'GAME_RESET':
       case 'REGIA_RESET_GAME':
-        this.handleGameReset();
-        break;
-
-      // 5. Vincita dichiarata (Ambo, Terno, Tombola, ecc.)
-      case 'WIN_DECLARED':
-        this.handleWinDeclared(data);
-        break;
-
-      // 6. Aggiornamento Montepremi Non Vinti
-      case 'UNCLAIMED_UPDATED':
-        this.updateUnclaimedPot(data.unclaimedPot);
-        break;
-
-      // 7. Conteggio schermi/client connessi
-      case 'CLIENT_COUNT':
-        if (typeof data.count === 'number') {
-          this.updateWsBadge('active', `WS Live (${data.count} ${data.count === 1 ? 'schermo' : 'schermi'})`);
+        if (!handledByController) {
+          this.handleGameReset();
         }
         break;
 
-      // 8. Stato iniziale al momento della connessione
-      case 'STATE_INIT':
-        this.handleStateInit(data.state);
+      case 'WIN_DECLARED':
+        if (!handledByController) {
+          this.handleWinDeclared(data);
+        }
         break;
 
-      // 9. Pong di misurazione latenza
-      case 'PONG': {
-        const latency = typeof data.clientTime === 'number' ? Math.max(1, Date.now() - data.clientTime) : 12;
-        this.updateLatencyUI(latency);
+      case 'UNCLAIMED_UPDATED':
+      case 'UPDATE_UNCLAIMED':
+        if (!handledByController) {
+          this.updateUnclaimedPot(data.unclaimedPot);
+        }
         break;
-      }
+
+      case 'STATE_INIT':
+      case 'FULL_STATE_SYNC':
+      case 'SYNC_FULL_STATE':
+        if (typeof data.connectedClients === 'number') {
+          this.connectedClientCount = data.connectedClients;
+          this.updateWsBadge(
+            'active',
+            `WS Live (${data.connectedClients} ${data.connectedClients === 1 ? 'schermo' : 'schermi'})`
+          );
+          realtimeSync.notifyStatus(this.status, data.connectedClients);
+        }
+        if (!handledByController && data.state) {
+          this.handleStateInit(data.state);
+        }
+        break;
 
       default:
         break;
     }
   }
 
-  /**
-   * Aggiorna automaticamente il Tabellone a 90 numeri e i Contatori di Gioco
-   */
   private handleExtractionEvent(data: ExtractionPayload) {
     const num = Number(data.number);
     if (!num || num < 1 || num > 90) return;
 
-    console.log(`⚡ [WS-Client] Ricevuta estrazione in tempo reale dalla Regia: NUMERO ${num}`);
-
-    // 1. Se il controller tombola principale è pronto, elabora logica cartelle e audio
     const tombolaGame = (window as any).__tombolaGame;
     if (tombolaGame && typeof tombolaGame.processExtractedNumber === 'function') {
       tombolaGame.processExtractedNumber(num, true, data.smorfia);
-      return; // processExtractedNumber gestisce l'aggiornamento completo
+      return;
     }
 
-    // 2. Aggiornamento Diretto DOM del Tabellone a 90 numeri (Fallback / Rendering Istantaneo)
     this.updateBoardCell(num);
-
-    // 3. Aggiorna Numero Gigante e Smorfia
     this.updateCurrentNumberDisplay(num, data.smorfia);
-
-    // 4. Aggiorna Contatori di Gioco (Estratti, Rimanenti, Percentuale)
     this.updateGameCounters();
-
-    // 5. Aggiorna Striscia Ultimi Numeri
     this.updateLastNumbersStrip(num);
   }
 
@@ -229,7 +415,6 @@ class ClientWebSocketManager {
       cell.classList.remove('flip-circle', 'flipping-to-green-phase1', 'flipping-to-green-phase2');
       cell.classList.add('extracted');
 
-      // Animazione 3D verso tessera verde smeraldo con smusso dorato
       setTimeout(() => {
         if (cell.classList.contains('extracted')) {
           cell.classList.add('flipping-to-green-phase1');
@@ -248,7 +433,6 @@ class ClientWebSocketManager {
       }, 2500);
     }
 
-    // Aggiorna anche cella nel mini-tabellone Regia se presente
     const regiaCell = document.getElementById(`regia-cell-${num}`);
     if (regiaCell) {
       regiaCell.classList.add('extracted');
@@ -260,7 +444,7 @@ class ClientWebSocketManager {
     if (currentNumEl) {
       currentNumEl.textContent = String(num);
       currentNumEl.classList.remove('extract-animation');
-      void currentNumEl.offsetWidth; // Trigger reflow
+      void currentNumEl.offsetWidth;
       currentNumEl.classList.add('extract-animation');
       setTimeout(() => {
         currentNumEl.classList.remove('extract-animation');
@@ -323,14 +507,12 @@ class ClientWebSocketManager {
   }
 
   private handleGameReset() {
-    console.log('[WS-Client] Reset partita ricevuto dalla Regia.');
     const tombolaGame = (window as any).__tombolaGame;
     if (tombolaGame && typeof tombolaGame.resetGame === 'function') {
       tombolaGame.resetGame(true);
       return;
     }
 
-    // Reset DOM tabellone e contatori
     document.querySelectorAll('.number').forEach((cell) => {
       cell.classList.remove('extracted', 'flip-circle', 'flipping-to-green-phase1', 'flipping-to-green-phase2', 'board-cell-win');
     });
@@ -359,21 +541,22 @@ class ClientWebSocketManager {
   private updateUnclaimedPot(amount: number) {
     if (typeof amount === 'number') {
       const unclaimedEl = document.getElementById('unclaimedPotDisplay');
-      if (unclaimedEl) {
-        unclaimedEl.textContent = `€ ${amount.toFixed(2)}`;
-      }
+      if (unclaimedEl) unclaimedEl.textContent = `€ ${amount.toFixed(2)}`;
       const regiaUnclaimedEl = document.getElementById('regiaUnclaimedVal');
-      if (regiaUnclaimedEl) {
-        regiaUnclaimedEl.textContent = `€ ${amount.toFixed(2)}`;
-      }
+      if (regiaUnclaimedEl) regiaUnclaimedEl.textContent = `€ ${amount.toFixed(2)}`;
     }
   }
 
   private handleStateInit(state: any) {
     if (!state) return;
     if (Array.isArray(state.extractedNumbers) && state.extractedNumbers.length > 0) {
-      state.extractedNumbers.forEach((n: number) => this.updateBoardCell(n));
-      this.updateGameCounters();
+      const tombolaGame = (window as any).__tombolaGame;
+      if (tombolaGame && typeof tombolaGame.processExtractedNumber === 'function') {
+        state.extractedNumbers.forEach((n: number) => tombolaGame.processExtractedNumber(n, true));
+      } else {
+        state.extractedNumbers.forEach((n: number) => this.updateBoardCell(n));
+        this.updateGameCounters();
+      }
     }
     if (state.unclaimedPot !== undefined) {
       this.updateUnclaimedPot(state.unclaimedPot);
@@ -410,6 +593,9 @@ class ClientWebSocketManager {
     const txt = document.getElementById('regiaWsText');
     if (badge) {
       badge.className = `regia-ws-badge ${status}`;
+      if (this.currentWsUrl) {
+        badge.title = `WebSocket Live: ${this.currentWsUrl}`;
+      }
     }
     if (txt) {
       txt.textContent = label;
@@ -425,10 +611,12 @@ class ClientWebSocketManager {
       if (bars) bars.className = 'ws-signal-bars';
       if (pill) pill.className = 'ws-latency-pill';
       if (val) val.textContent = '... ms';
+    } else if (status === 'active' && this.currentLatency === 0) {
+      if (bars) bars.className = 'ws-signal-bars excellent';
+      if (pill) pill.className = 'ws-latency-pill excellent';
     }
   }
 }
 
-// Inizializza il gestore WebSocket globale lato client
 export const clientWsManager = new ClientWebSocketManager();
 (window as any).ClientWsManager = clientWsManager;
