@@ -4,20 +4,25 @@ import * as jackpotService from './firebase-jackpot-service';
 import { realtimeSync, type ConnectionStatus, type RealtimeMessage } from './realtime-sync';
 import './tombola-controller.js';
 import './online-guide-manager';
-import { resolveWebSocketUrl } from './utils/ws-url';
+import {
+  APP_CONFIG,
+  CUSTOM_WS_STORAGE_KEY,
+  getAppBaseUrl,
+  getWebSocketUrl,
+  resolveRuntimeAppConfig,
+} from './config';
 
 /**
  * ============================================================================
  * GESTORE CONNESSIONE WEBSOCKET IN TEMPO REALE (REGIA <-> SCHERMO TV)
  * ============================================================================
- * Unifica la connessione WebSocket + BroadcastChannel per sincronizzare
- * istantaneamente il tabellone a 90 numeri, le cartelle, i contatori e le vincite
- * tra la Console Regia e lo Schermo TV Studio utilizzando l'URL di hosting
- * configurato (VITE_WS_URL, VITE_APP_URL, APP_URL, ?ws=, o window.location).
+ * Legge la configurazione da src/config.ts (VITE_APP_URL / VITE_WS_URL con
+ * fallback su URL relativi), verifica la connessione all'avvio con log dedicato
+ * e mostra una notifica visiva nella UI della Regia se il server non risponde.
  */
 
-const CUSTOM_WS_STORAGE_KEY = 'tombola90_ws_url';
 const BROADCAST_CHANNEL_NAME = 'tombola90_realtime_channel';
+const STARTUP_CHECK_TIMEOUT_MS = 4500;
 
 interface ExtractionPayload {
   type: string;
@@ -34,6 +39,7 @@ class ClientWebSocketManager {
   private broadcastChannel: BroadcastChannel | null = null;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private pingInterval: ReturnType<typeof setInterval> | null = null;
+  private startupCheckTimer: ReturnType<typeof setTimeout> | null = null;
   private isConnecting = false;
   private reconnectAttempts = 0;
   private readonly maxReconnectDelay = 8000;
@@ -41,6 +47,8 @@ class ClientWebSocketManager {
   private status: ConnectionStatus = 'disconnected';
   private connectedClientCount = 1;
   private currentLatency = 0;
+  private startupVerified = false;
+  private alertDismissedByUser = false;
 
   constructor() {
     this.init();
@@ -52,10 +60,16 @@ class ClientWebSocketManager {
     this.initBroadcastChannel();
     this.bindRealtimeBus();
 
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => this.connect());
-    } else {
+    const boot = () => {
+      this.wireAlertControls();
       this.connect();
+      this.verifyWebSocketConnectionOnStartup();
+    };
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', boot);
+    } else {
+      boot();
     }
   }
 
@@ -83,38 +97,27 @@ class ClientWebSocketManager {
     }
   }
 
-  private getConfiguredHostingUrl(): string {
-    const fromViteApp = typeof import.meta !== 'undefined' && import.meta.env?.VITE_APP_URL
-      ? import.meta.env.VITE_APP_URL
-      : '';
-    const fromDefine = typeof __APP_HOSTING_URL__ !== 'undefined' ? __APP_HOSTING_URL__ : '';
-    return fromViteApp || fromDefine || '';
+  private wireAlertControls() {
+    const retryBtn = document.getElementById('regiaWsRetryBtn');
+    if (retryBtn) {
+      retryBtn.addEventListener('click', () => {
+        this.alertDismissedByUser = false;
+        this.appendRegiaLog('Nuovo tentativo di connessione WebSocket avviato dall\'operatore...', 'info');
+        this.reconnect();
+      });
+    }
+
+    const dismissBtn = document.getElementById('regiaWsDismissBtn');
+    if (dismissBtn) {
+      dismissBtn.addEventListener('click', () => {
+        this.alertDismissedByUser = true;
+        this.hideUnreachableNotification();
+      });
+    }
   }
 
   public resolveTargetWsUrl(): string | null {
-    if (typeof window === 'undefined') return null;
-
-    let storedWsUrl: string | null = null;
-    try {
-      storedWsUrl = window.localStorage.getItem(CUSTOM_WS_STORAGE_KEY);
-    } catch {
-      storedWsUrl = null;
-    }
-
-    const viteWsUrl = typeof import.meta !== 'undefined' ? import.meta.env?.VITE_WS_URL : undefined;
-    const viteAppUrl = typeof import.meta !== 'undefined' ? import.meta.env?.VITE_APP_URL : undefined;
-    const configuredAppUrl = typeof __APP_HOSTING_URL__ !== 'undefined' ? __APP_HOSTING_URL__ : undefined;
-
-    return resolveWebSocketUrl({
-      search: window.location.search,
-      storedWsUrl,
-      viteWsUrl,
-      viteAppUrl,
-      configuredAppUrl,
-      windowProtocol: window.location.protocol,
-      windowHost: window.location.host,
-      windowHostname: window.location.hostname,
-    });
+    return getWebSocketUrl();
   }
 
   public getWsUrl(): string | null {
@@ -122,7 +125,11 @@ class ClientWebSocketManager {
   }
 
   public getHostingUrl(): string {
-    return this.getConfiguredHostingUrl() || (typeof window !== 'undefined' ? window.location.origin : '');
+    return getAppBaseUrl();
+  }
+
+  public getConfig() {
+    return resolveRuntimeAppConfig();
   }
 
   public getClientRole(): 'tv' | 'regia' {
@@ -142,13 +149,20 @@ class ClientWebSocketManager {
     } catch {
       // Ignore storage failures
     }
+    this.alertDismissedByUser = false;
+    this.reconnect();
+  }
+
+  public reconnect() {
     this.reconnectAttempts = 0;
     this.disconnect();
     this.connect();
+    this.verifyWebSocketConnectionOnStartup();
   }
 
   public disconnect() {
     this.stopHeartbeat();
+    this.clearStartupCheckTimer();
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
@@ -163,6 +177,134 @@ class ClientWebSocketManager {
       this.ws = null;
     }
     this.isConnecting = false;
+  }
+
+  /**
+   * Script di verifica connessione WebSocket all'avvio:
+   * - Registra i dettagli ambientali (locale / cloud) e l'endpoint usato
+   * - Se il server non risponde entro STARTUP_CHECK_TIMEOUT_MS o restituisce errore,
+   *   mostra una notifica nella UI della Regia (evitando window.alert bloccanti).
+   */
+  public verifyWebSocketConnectionOnStartup(timeoutMs: number = STARTUP_CHECK_TIMEOUT_MS) {
+    this.clearStartupCheckTimer();
+    this.startupVerified = false;
+
+    const cfg = resolveRuntimeAppConfig();
+    const targetUrl = this.currentWsUrl || cfg.wsUrl;
+
+    console.info(
+      `[WS-Startup] Verifica connessione all'avvio | ambiente=${cfg.environment} | appUrl=${cfg.appUrl} | wsUrl=${targetUrl || 'non configurato'}`
+    );
+    this.appendRegiaLog(
+      `Verifica WebSocket all'avvio (${cfg.environment.toUpperCase()}): ${targetUrl || 'nessun server configurato'}`,
+      'info'
+    );
+
+    if (!targetUrl) {
+      this.notifyServerUnreachable(
+        'Nessun server WebSocket configurato per questo host statico. Attivo solo sync locale via BroadcastChannel.'
+      );
+      return;
+    }
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.startupVerified = true;
+      this.hideUnreachableNotification();
+      return;
+    }
+
+    this.startupCheckTimer = setTimeout(() => {
+      if (!this.startupVerified && (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
+        this.notifyServerUnreachable(
+          `Server WebSocket irraggiungibile su ${targetUrl} (timeout ${Math.round(timeoutMs / 1000)}s). Controlla che il backend sia avviato.`
+        );
+      }
+    }, timeoutMs);
+  }
+
+  private clearStartupCheckTimer() {
+    if (this.startupCheckTimer) {
+      clearTimeout(this.startupCheckTimer);
+      this.startupCheckTimer = null;
+    }
+  }
+
+  private appendRegiaLog(text: string, type: 'info' | 'win' | 'error' | 'warn' = 'info') {
+    if (typeof document === 'undefined') return;
+    const logContent = document.getElementById('regiaLogContent');
+    if (!logContent) return;
+
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+    const timeStr = new Date().toLocaleTimeString('it-IT');
+    entry.innerHTML = `<span class="log-time">[${timeStr}]</span> ${text}`;
+    logContent.appendChild(entry);
+    logContent.scrollTop = logContent.scrollHeight;
+  }
+
+  private notifyServerUnreachable(reason: string) {
+    console.error(`[WS-Startup] ❌ ${reason}`);
+    this.appendRegiaLog(`⚠️ ${reason}`, 'error');
+
+    if (this.alertDismissedByUser) return;
+
+    const alertBox = document.getElementById('regiaWsAlert');
+    const alertMsg = document.getElementById('regiaWsAlertMessage');
+    if (alertMsg) {
+      alertMsg.textContent = reason;
+    }
+    if (alertBox) {
+      alertBox.hidden = false;
+    }
+
+    // Mostra toast discreto solo se la console Regia non è attualmente visibile
+    const regiaSection = document.getElementById('regiaSection');
+    const isRegiaVisible = regiaSection?.classList.contains('active');
+    const existingToast = document.getElementById('wsStartupToast');
+    if (isRegiaVisible) {
+      if (existingToast) existingToast.hidden = true;
+    } else {
+      this.showStartupToast(reason);
+    }
+  }
+
+  private hideUnreachableNotification() {
+    const alertBox = document.getElementById('regiaWsAlert');
+    if (alertBox) {
+      alertBox.hidden = true;
+    }
+    const toast = document.getElementById('wsStartupToast');
+    if (toast) {
+      toast.hidden = true;
+    }
+  }
+
+  private showStartupToast(message: string) {
+    if (typeof document === 'undefined') return;
+    let toast = document.getElementById('wsStartupToast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'wsStartupToast';
+      toast.className = 'ws-startup-toast';
+      toast.setAttribute('role', 'alert');
+      toast.innerHTML = `
+        <i class="fas fa-exclamation-triangle" style="color:#fbbf24;margin-top:2px;flex-shrink:0;"></i>
+        <div style="flex:1;min-width:0;">
+          <strong style="display:block;color:#fde68a;margin-bottom:2px;">Server WebSocket irraggiungibile</strong>
+          <span id="wsStartupToastMsg"></span>
+        </div>
+        <button type="button" id="wsStartupToastClose" class="regia-ws-alert-close" aria-label="Chiudi">&times;</button>
+      `;
+      document.body.appendChild(toast);
+      const closeBtn = document.getElementById('wsStartupToastClose');
+      closeBtn?.addEventListener('click', () => {
+        this.alertDismissedByUser = true;
+        if (toast) toast.hidden = true;
+      });
+    }
+    const msgEl = document.getElementById('wsStartupToastMsg');
+    if (msgEl) msgEl.textContent = message;
+    toast.hidden = false;
   }
 
   public connect() {
@@ -188,17 +330,25 @@ class ClientWebSocketManager {
     realtimeSync.notifyStatus('connecting', this.connectedClientCount);
 
     try {
-      console.log(`[WS-Client] Connessione real-time (${this.getClientRole()}) a ${wsUrl}...`);
+      const cfg = APP_CONFIG;
+      console.log(
+        `[WS-Client] Connessione real-time (${this.getClientRole()}, env=${cfg.environment}) a ${wsUrl}...`
+      );
       const socket = new WebSocket(wsUrl);
+      let reportedUnreachableForSocket = false;
       this.ws = socket;
 
       socket.onopen = () => {
         if (this.ws !== socket) return;
         this.isConnecting = false;
         this.reconnectAttempts = 0;
+        this.startupVerified = true;
+        this.clearStartupCheckTimer();
         this.status = 'connected';
+        this.hideUnreachableNotification();
 
         console.log(`⚡ [WS-Client] Connesso con successo a ${wsUrl}`);
+        this.appendRegiaLog(`⚡ WebSocket connesso in tempo reale (${wsUrl}).`, 'info');
         this.updateWsBadge('active', `WS Live (${this.connectedClientCount} ${this.connectedClientCount === 1 ? 'schermo' : 'schermi'})`);
         realtimeSync.notifyStatus('connected', this.connectedClientCount);
 
@@ -224,6 +374,7 @@ class ClientWebSocketManager {
 
       socket.onclose = () => {
         if (this.ws !== socket) return;
+        const wasConnected = this.startupVerified;
         this.isConnecting = false;
         this.ws = null;
         this.stopHeartbeat();
@@ -231,6 +382,13 @@ class ClientWebSocketManager {
         console.warn('[WS-Client] Connessione WebSocket chiusa. Riconnessione programmata...');
         this.updateWsBadge('offline', 'WS In Riconnessione...');
         realtimeSync.notifyStatus('disconnected', this.connectedClientCount);
+        if (!wasConnected && !reportedUnreachableForSocket) {
+          reportedUnreachableForSocket = true;
+          this.clearStartupCheckTimer();
+          this.notifyServerUnreachable(
+            `Connessione WebSocket rifiutata o chiusa da ${wsUrl}. Verifica che il server sia attivo.`
+          );
+        }
         this.scheduleReconnect();
       };
 
@@ -241,11 +399,19 @@ class ClientWebSocketManager {
         console.warn('[WS-Client] Errore socket (attivo fallback BroadcastChannel):', err);
         this.updateWsBadge('offline', 'WS Locale (Fallback)');
         realtimeSync.notifyStatus('error', this.connectedClientCount);
+        if (!reportedUnreachableForSocket) {
+          reportedUnreachableForSocket = true;
+          this.clearStartupCheckTimer();
+          this.notifyServerUnreachable(
+            `Server WebSocket non raggiungibile su ${wsUrl}. Attivo fallback locale BroadcastChannel.`
+          );
+        }
       };
     } catch (e) {
       this.isConnecting = false;
       this.status = 'disconnected';
       realtimeSync.notifyStatus('disconnected', this.connectedClientCount);
+      this.notifyServerUnreachable(`Errore inizializzazione WebSocket su ${wsUrl}.`);
       this.scheduleReconnect();
     }
   }
@@ -330,10 +496,8 @@ class ClientWebSocketManager {
       return;
     }
 
-    // Inoltra al controller di gioco tramite il bus TombolaSync
     const handledByController = realtimeSync.dispatchIncomingMessage(data, origin);
 
-    // Sincronizzazione diretta del tabellone e stato HUD
     switch (data.type) {
       case 'NUMBER_EXTRACTED':
       case 'REGIA_EXTRACT':

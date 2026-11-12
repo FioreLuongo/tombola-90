@@ -3549,6 +3549,121 @@ nav > .box-id-badge {
   box-shadow: none !important;
 }
 
+.regia-ws-alert[hidden] {
+  display: none !important;
+}
+
+.regia-ws-alert {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(127, 29, 29, 0.92), rgba(153, 27, 27, 0.85));
+  border: 1px solid rgba(248, 113, 113, 0.6);
+  color: #fef2f2;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.regia-ws-alert-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.regia-ws-alert-content > i {
+  font-size: 16px;
+  color: #fbbf24;
+  flex-shrink: 0;
+}
+
+.regia-ws-alert-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.regia-ws-alert-text strong {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  color: #fde68a;
+}
+
+.regia-ws-alert-text span {
+  font-size: 11px;
+  color: #fee2e2;
+  line-height: 1.35;
+}
+
+.regia-ws-alert-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.regia-ws-alert-retry {
+  background: rgba(251, 191, 36, 0.2);
+  border: 1px solid rgba(251, 191, 36, 0.55);
+  color: #fef08a;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: background 0.2s ease;
+}
+
+.regia-ws-alert-retry:hover {
+  background: rgba(251, 191, 36, 0.35);
+}
+
+.regia-ws-alert-close {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ws-startup-toast {
+  position: fixed;
+  bottom: 18px;
+  right: 18px;
+  z-index: 10020;
+  max-width: 390px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(127, 29, 29, 0.96);
+  border: 1px solid rgba(248, 113, 113, 0.65);
+  color: #fef2f2;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(10px);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ws-startup-toast[hidden] {
+  display: none !important;
+}
+
 /* 1. Heartbeat Pulse Dot */
 .ws-heartbeat-dot {
   width: 8px;

@@ -180,6 +180,19 @@
             <button class="regia-btn regia-btn-close" id="regiaCloseBtn"><i class="fas fa-times"></i> <span>Chiudi Regia</span></button>
         </div>
     </div>
+    <div class="regia-ws-alert" id="regiaWsAlert" role="alert" aria-live="polite" hidden>
+        <div class="regia-ws-alert-content">
+            <i class="fas fa-exclamation-triangle"></i>
+            <div class="regia-ws-alert-text">
+                <strong id="regiaWsAlertTitle">Server WebSocket irraggiungibile</strong>
+                <span id="regiaWsAlertMessage">Impossibile stabilire la connessione real-time con il server. Attivo fallback locale BroadcastChannel.</span>
+            </div>
+        </div>
+        <div class="regia-ws-alert-actions">
+            <button type="button" class="regia-ws-alert-retry" id="regiaWsRetryBtn"><i class="fas fa-sync-alt"></i> Riprova</button>
+            <button type="button" class="regia-ws-alert-close" id="regiaWsDismissBtn" aria-label="Chiudi notifica"><i class="fas fa-times"></i></button>
+        </div>
+    </div>
     <div class="regia-scrollable-container">
         <div class="regia-grid">
             <!-- BOX DEDICATO: MESSA ONLINE & DOWNLOAD GUIDA PDF PASSO-PASSO -->
