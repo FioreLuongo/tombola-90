@@ -4,24 +4,26 @@ import * as jackpotService from './firebase-jackpot-service';
 import { realtimeSync, type ConnectionStatus, type RealtimeMessage } from './realtime-sync';
 import './tombola-controller.js';
 import './online-guide-manager';
+import { getAppBaseUrl, getWebSocketUrl, resolveRuntimeAppConfig } from './config';
 import {
-  APP_CONFIG,
-  CUSTOM_WS_STORAGE_KEY,
-  getAppBaseUrl,
-  getWebSocketUrl,
-  resolveRuntimeAppConfig,
-} from './config';
+  disconnectWebSocket,
+  getTransportState,
+  initWebSocket,
+  isBroadcastFallbackActive,
+  reconnectWebSocket,
+  sendRealtimeMessage,
+  setCustomWebSocketUrl,
+} from './websocket';
 
 /**
  * ============================================================================
- * GESTORE CONNESSIONE WEBSOCKET IN TEMPO REALE (REGIA <-> SCHERMO TV)
+ * ORCHESTRATORE REAL-TIME LATO CLIENT (REGIA <-> SCHERMO TV)
  * ============================================================================
- * Legge la configurazione da src/config.ts (VITE_APP_URL / VITE_WS_URL con
- * fallback su URL relativi), verifica la connessione all'avvio con log dedicato
- * e mostra una notifica visiva nella UI della Regia se il server non risponde.
+ * Utilizza initWebSocket() (src/websocket.ts) e gli URL di src/config.ts per
+ * sincronizzare tabellone, contatori e vincite tra Console Regia e TV Studio,
+ * con verifica all'avvio e attivazione automatica del fallback BroadcastChannel.
  */
 
-const BROADCAST_CHANNEL_NAME = 'tombola90_realtime_channel';
 const STARTUP_CHECK_TIMEOUT_MS = 4500;
 
 interface ExtractionPayload {
@@ -35,18 +37,7 @@ interface ExtractionPayload {
 }
 
 class ClientWebSocketManager {
-  private ws: WebSocket | null = null;
-  private broadcastChannel: BroadcastChannel | null = null;
-  private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
-  private pingInterval: ReturnType<typeof setInterval> | null = null;
   private startupCheckTimer: ReturnType<typeof setTimeout> | null = null;
-  private isConnecting = false;
-  private reconnectAttempts = 0;
-  private readonly maxReconnectDelay = 8000;
-  private currentWsUrl: string | null = null;
-  private status: ConnectionStatus = 'disconnected';
-  private connectedClientCount = 1;
-  private currentLatency = 0;
   private startupVerified = false;
   private alertDismissedByUser = false;
 
@@ -57,7 +48,6 @@ class ClientWebSocketManager {
   private init() {
     if (typeof window === 'undefined') return;
 
-    this.initBroadcastChannel();
     this.bindRealtimeBus();
 
     const boot = () => {
@@ -77,24 +67,10 @@ class ClientWebSocketManager {
     realtimeSync.bindTransport({
       send: (msg: RealtimeMessage) => this.send(msg),
       connect: () => this.connect(),
-      getStatus: () => this.status,
-      getClientCount: () => this.connectedClientCount,
-      getLatency: () => this.currentLatency,
+      getStatus: () => getTransportState().status,
+      getClientCount: () => getTransportState().clientCount,
+      getLatency: () => getTransportState().latencyMs,
     });
-  }
-
-  private initBroadcastChannel() {
-    if (typeof window === 'undefined' || !('BroadcastChannel' in window)) return;
-    try {
-      this.broadcastChannel = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
-      this.broadcastChannel.onmessage = (event: MessageEvent) => {
-        if (event?.data) {
-          this.handleIncomingData(event.data, 'broadcast_channel');
-        }
-      };
-    } catch (err) {
-      console.warn('[WS-Client] BroadcastChannel non disponibile:', err);
-    }
   }
 
   private wireAlertControls() {
@@ -102,7 +78,7 @@ class ClientWebSocketManager {
     if (retryBtn) {
       retryBtn.addEventListener('click', () => {
         this.alertDismissedByUser = false;
-        this.appendRegiaLog('Nuovo tentativo di connessione WebSocket avviato dall\'operatore...', 'info');
+        this.appendRegiaLog("Nuovo tentativo di connessione WebSocket avviato dall'operatore...", 'info');
         this.reconnect();
       });
     }
@@ -121,7 +97,7 @@ class ClientWebSocketManager {
   }
 
   public getWsUrl(): string | null {
-    return this.currentWsUrl || this.resolveTargetWsUrl();
+    return getTransportState().wsUrl || this.resolveTargetWsUrl();
   }
 
   public getHostingUrl(): string {
@@ -132,6 +108,10 @@ class ClientWebSocketManager {
     return resolveRuntimeAppConfig();
   }
 
+  public isFallbackActive(): boolean {
+    return isBroadcastFallbackActive();
+  }
+
   public getClientRole(): 'tv' | 'regia' {
     if (typeof window === 'undefined') return 'regia';
     const params = new URLSearchParams(window.location.search);
@@ -139,84 +119,119 @@ class ClientWebSocketManager {
   }
 
   public setCustomWsUrl(customUrl: string | null) {
-    if (typeof window === 'undefined') return;
-    try {
-      if (customUrl && customUrl.trim()) {
-        window.localStorage.setItem(CUSTOM_WS_STORAGE_KEY, customUrl.trim());
-      } else {
-        window.localStorage.removeItem(CUSTOM_WS_STORAGE_KEY);
-      }
-    } catch {
-      // Ignore storage failures
-    }
     this.alertDismissedByUser = false;
-    this.reconnect();
+    setCustomWebSocketUrl(customUrl);
+    this.verifyWebSocketConnectionOnStartup();
   }
 
   public reconnect() {
-    this.reconnectAttempts = 0;
-    this.disconnect();
-    this.connect();
+    this.clearStartupCheckTimer();
+    this.startupVerified = false;
+    reconnectWebSocket();
     this.verifyWebSocketConnectionOnStartup();
   }
 
   public disconnect() {
-    this.stopHeartbeat();
     this.clearStartupCheckTimer();
-    if (this.reconnectTimeout) {
-      clearTimeout(this.reconnectTimeout);
-      this.reconnectTimeout = null;
-    }
-    if (this.ws) {
-      try {
-        this.ws.onclose = null;
-        this.ws.close();
-      } catch {
-        // Ignore close errors
-      }
-      this.ws = null;
-    }
-    this.isConnecting = false;
+    disconnectWebSocket(false);
+  }
+
+  public connect() {
+    if (typeof window === 'undefined') return;
+
+    initWebSocket({
+      role: this.getClientRole(),
+      onMessage: (data, origin) => this.handleIncomingData(data, origin),
+      onStatusChange: (status: ConnectionStatus, clientCount: number, fallbackActive: boolean) => {
+        if (status === 'connected') {
+          this.updateWsBadge('active', `WS Live (${clientCount} ${clientCount === 1 ? 'schermo' : 'schermi'})`);
+        } else if (status === 'connecting') {
+          this.updateWsBadge('connecting', 'Connessione WS...');
+        } else {
+          this.updateWsBadge(
+            'offline',
+            fallbackActive ? 'WS Locale (Fallback)' : 'WS In Riconnessione...'
+          );
+        }
+        realtimeSync.notifyStatus(status, clientCount);
+      },
+      onConnected: (wsUrl: string) => {
+        this.startupVerified = true;
+        this.clearStartupCheckTimer();
+        this.hideUnreachableNotification();
+        console.log(`⚡ [WS-Client] Connesso con successo a ${wsUrl}`);
+        this.appendRegiaLog(`⚡ WebSocket connesso in tempo reale (${wsUrl}).`, 'info');
+      },
+      onFallbackActivated: (reason: string) => {
+        this.clearStartupCheckTimer();
+        this.notifyServerUnreachable(reason);
+      },
+      onLatency: (latencyMs: number) => {
+        this.updateLatencyUI(latencyMs);
+        realtimeSync.notifyLatency(latencyMs);
+      },
+      onClientCount: (count: number) => {
+        const state = getTransportState();
+        this.updateWsBadge(
+          state.status === 'connected' ? 'active' : 'connecting',
+          `WS Live (${count} ${count === 1 ? 'schermo' : 'schermi'})`
+        );
+      },
+      onRawLog: (message, level) => {
+        if (level === 'error') console.error(message);
+        else if (level === 'warn') console.warn(message);
+        else console.info(message);
+      },
+    });
+  }
+
+  public send(msg: RealtimeMessage) {
+    sendRealtimeMessage(msg);
+  }
+
+  public syncBoardExtraction(number: number, smorfia: string = '') {
+    this.send({
+      type: 'REGIA_EXTRACT',
+      number,
+      smorfia,
+      source: this.getClientRole(),
+      timestamp: Date.now(),
+    });
   }
 
   /**
-   * Script di verifica connessione WebSocket all'avvio:
-   * - Registra i dettagli ambientali (locale / cloud) e l'endpoint usato
-   * - Se il server non risponde entro STARTUP_CHECK_TIMEOUT_MS o restituisce errore,
-   *   mostra una notifica nella UI della Regia (evitando window.alert bloccanti).
+   * Verifica la connessione WebSocket all'avvio:
+   * - Registra ambiente/URL nel log console e Regia
+   * - Se il server è irraggiungibile entro timeoutMs, conferma fallback BroadcastChannel
+   *   e mostra la notifica nella UI della Regia.
    */
   public verifyWebSocketConnectionOnStartup(timeoutMs: number = STARTUP_CHECK_TIMEOUT_MS) {
     this.clearStartupCheckTimer();
-    this.startupVerified = false;
-
+    const state = getTransportState();
     const cfg = resolveRuntimeAppConfig();
-    const targetUrl = this.currentWsUrl || cfg.wsUrl;
+    const targetUrl = state.wsUrl || cfg.wsUrl;
 
     console.info(
-      `[WS-Startup] Verifica connessione all'avvio | ambiente=${cfg.environment} | appUrl=${cfg.appUrl} | wsUrl=${targetUrl || 'non configurato'}`
+      `[WS-Startup] Verifica connessione all'avvio | ambiente=${cfg.environment} | appUrl=${cfg.appUrl} | wsUrl=${targetUrl || 'non configurato'} | fallback=${state.fallbackActive}`
     );
     this.appendRegiaLog(
-      `Verifica WebSocket all'avvio (${cfg.environment.toUpperCase()}): ${targetUrl || 'nessun server configurato'}`,
+      `Verifica WebSocket all'avvio (${cfg.environment.toUpperCase()}): ${targetUrl || 'nessun server remoto -> BroadcastChannel'}`,
       'info'
     );
 
-    if (!targetUrl) {
-      this.notifyServerUnreachable(
-        'Nessun server WebSocket configurato per questo host statico. Attivo solo sync locale via BroadcastChannel.'
-      );
-      return;
-    }
-
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+    if (state.status === 'connected') {
       this.startupVerified = true;
       this.hideUnreachableNotification();
       return;
     }
 
+    if (!targetUrl) return;
+
     this.startupCheckTimer = setTimeout(() => {
-      if (!this.startupVerified && (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
+      const current = getTransportState();
+      if (!this.startupVerified && current.status !== 'connected') {
         this.notifyServerUnreachable(
-          `Server WebSocket irraggiungibile su ${targetUrl} (timeout ${Math.round(timeoutMs / 1000)}s). Controlla che il backend sia avviato.`
+          `Server WebSocket irraggiungibile su ${targetUrl} (timeout ${Math.round(timeoutMs / 1000)}s). Attivo fallback locale BroadcastChannel.`
         );
       }
     }, timeoutMs);
@@ -257,7 +272,6 @@ class ClientWebSocketManager {
       alertBox.hidden = false;
     }
 
-    // Mostra toast discreto solo se la console Regia non è attualmente visibile
     const regiaSection = document.getElementById('regiaSection');
     const isRegiaVisible = regiaSection?.classList.contains('active');
     const existingToast = document.getElementById('wsStartupToast');
@@ -270,13 +284,9 @@ class ClientWebSocketManager {
 
   private hideUnreachableNotification() {
     const alertBox = document.getElementById('regiaWsAlert');
-    if (alertBox) {
-      alertBox.hidden = true;
-    }
+    if (alertBox) alertBox.hidden = true;
     const toast = document.getElementById('wsStartupToast');
-    if (toast) {
-      toast.hidden = true;
-    }
+    if (toast) toast.hidden = true;
   }
 
   private showStartupToast(message: string) {
@@ -307,194 +317,8 @@ class ClientWebSocketManager {
     toast.hidden = false;
   }
 
-  public connect() {
-    if (typeof window === 'undefined') return;
-    if (this.isConnecting || (this.ws && this.ws.readyState === WebSocket.OPEN)) {
-      return;
-    }
-
-    const wsUrl = this.resolveTargetWsUrl();
-    this.currentWsUrl = wsUrl;
-
-    if (!wsUrl) {
-      this.status = 'disconnected';
-      this.updateWsBadge('offline', 'WS Locale (BroadcastChannel)');
-      realtimeSync.notifyStatus('disconnected', this.connectedClientCount);
-      console.info('[WS-Client] Nessun endpoint WebSocket remoto configurato: attivo sync locale via BroadcastChannel.');
-      return;
-    }
-
-    this.isConnecting = true;
-    this.status = 'connecting';
-    this.updateWsBadge('connecting', 'Connessione WS...');
-    realtimeSync.notifyStatus('connecting', this.connectedClientCount);
-
-    try {
-      const cfg = APP_CONFIG;
-      console.log(
-        `[WS-Client] Connessione real-time (${this.getClientRole()}, env=${cfg.environment}) a ${wsUrl}...`
-      );
-      const socket = new WebSocket(wsUrl);
-      let reportedUnreachableForSocket = false;
-      this.ws = socket;
-
-      socket.onopen = () => {
-        if (this.ws !== socket) return;
-        this.isConnecting = false;
-        this.reconnectAttempts = 0;
-        this.startupVerified = true;
-        this.clearStartupCheckTimer();
-        this.status = 'connected';
-        this.hideUnreachableNotification();
-
-        console.log(`⚡ [WS-Client] Connesso con successo a ${wsUrl}`);
-        this.appendRegiaLog(`⚡ WebSocket connesso in tempo reale (${wsUrl}).`, 'info');
-        this.updateWsBadge('active', `WS Live (${this.connectedClientCount} ${this.connectedClientCount === 1 ? 'schermo' : 'schermi'})`);
-        realtimeSync.notifyStatus('connected', this.connectedClientCount);
-
-        // Registra il ruolo (Regia o TV Studio) e l'URL di hosting
-        this.sendWsOnly({
-          type: 'REGISTER_CLIENT',
-          role: this.getClientRole(),
-          hostingUrl: this.getHostingUrl(),
-          timestamp: Date.now(),
-        });
-
-        this.startHeartbeat();
-      };
-
-      socket.onmessage = (event: MessageEvent) => {
-        try {
-          const data = JSON.parse(event.data);
-          this.handleIncomingData(data, 'websocket');
-        } catch (err) {
-          console.error('[WS-Client] Errore parsing messaggio WebSocket:', err);
-        }
-      };
-
-      socket.onclose = () => {
-        if (this.ws !== socket) return;
-        const wasConnected = this.startupVerified;
-        this.isConnecting = false;
-        this.ws = null;
-        this.stopHeartbeat();
-        this.status = 'disconnected';
-        console.warn('[WS-Client] Connessione WebSocket chiusa. Riconnessione programmata...');
-        this.updateWsBadge('offline', 'WS In Riconnessione...');
-        realtimeSync.notifyStatus('disconnected', this.connectedClientCount);
-        if (!wasConnected && !reportedUnreachableForSocket) {
-          reportedUnreachableForSocket = true;
-          this.clearStartupCheckTimer();
-          this.notifyServerUnreachable(
-            `Connessione WebSocket rifiutata o chiusa da ${wsUrl}. Verifica che il server sia attivo.`
-          );
-        }
-        this.scheduleReconnect();
-      };
-
-      socket.onerror = (err) => {
-        if (this.ws !== socket) return;
-        this.isConnecting = false;
-        this.status = 'error';
-        console.warn('[WS-Client] Errore socket (attivo fallback BroadcastChannel):', err);
-        this.updateWsBadge('offline', 'WS Locale (Fallback)');
-        realtimeSync.notifyStatus('error', this.connectedClientCount);
-        if (!reportedUnreachableForSocket) {
-          reportedUnreachableForSocket = true;
-          this.clearStartupCheckTimer();
-          this.notifyServerUnreachable(
-            `Server WebSocket non raggiungibile su ${wsUrl}. Attivo fallback locale BroadcastChannel.`
-          );
-        }
-      };
-    } catch (e) {
-      this.isConnecting = false;
-      this.status = 'disconnected';
-      realtimeSync.notifyStatus('disconnected', this.connectedClientCount);
-      this.notifyServerUnreachable(`Errore inizializzazione WebSocket su ${wsUrl}.`);
-      this.scheduleReconnect();
-    }
-  }
-
-  private sendWsOnly(msg: RealtimeMessage) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      try {
-        this.ws.send(JSON.stringify(msg));
-      } catch (err) {
-        console.warn('[WS-Client] Errore invio WebSocket:', err);
-      }
-    }
-  }
-
-  public send(msg: RealtimeMessage) {
-    this.sendWsOnly(msg);
-
-    if (this.broadcastChannel) {
-      try {
-        this.broadcastChannel.postMessage(msg);
-      } catch (err) {
-        console.warn('[WS-Client] Errore invio BroadcastChannel:', err);
-      }
-    }
-  }
-
-  public syncBoardExtraction(number: number, smorfia: string = '') {
-    this.send({
-      type: 'REGIA_EXTRACT',
-      number,
-      smorfia,
-      source: this.getClientRole(),
-      timestamp: Date.now(),
-    });
-  }
-
-  private startHeartbeat() {
-    this.stopHeartbeat();
-    const sendPing = () => {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.sendWsOnly({ type: 'PING', clientTime: Date.now() });
-      }
-    };
-    sendPing();
-    this.pingInterval = setInterval(sendPing, 3500);
-  }
-
-  private stopHeartbeat() {
-    if (this.pingInterval) {
-      clearInterval(this.pingInterval);
-      this.pingInterval = null;
-    }
-  }
-
-  private scheduleReconnect() {
-    if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
-    const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), this.maxReconnectDelay);
-    this.reconnectAttempts++;
-    this.reconnectTimeout = setTimeout(() => {
-      this.connect();
-    }, delay);
-  }
-
   private handleIncomingData(data: any, origin: 'websocket' | 'broadcast_channel') {
     if (!data || !data.type) return;
-
-    if (data.type === 'CLIENT_COUNT') {
-      if (typeof data.count === 'number') {
-        this.connectedClientCount = data.count;
-        const badgeLabel = `WS Live (${data.count} ${data.count === 1 ? 'schermo' : 'schermi'})`;
-        this.updateWsBadge(this.status === 'connected' ? 'active' : 'connecting', badgeLabel);
-        realtimeSync.notifyStatus(this.status, data.count);
-      }
-      return;
-    }
-
-    if (data.type === 'PONG') {
-      const latency = typeof data.clientTime === 'number' ? Math.max(1, Date.now() - data.clientTime) : 12;
-      this.currentLatency = latency;
-      this.updateLatencyUI(latency);
-      realtimeSync.notifyLatency(latency);
-      return;
-    }
 
     const handledByController = realtimeSync.dispatchIncomingMessage(data, origin);
 
@@ -539,14 +363,6 @@ class ClientWebSocketManager {
       case 'STATE_INIT':
       case 'FULL_STATE_SYNC':
       case 'SYNC_FULL_STATE':
-        if (typeof data.connectedClients === 'number') {
-          this.connectedClientCount = data.connectedClients;
-          this.updateWsBadge(
-            'active',
-            `WS Live (${data.connectedClients} ${data.connectedClients === 1 ? 'schermo' : 'schermi'})`
-          );
-          realtimeSync.notifyStatus(this.status, data.connectedClients);
-        }
         if (!handledByController && data.state) {
           this.handleStateInit(data.state);
         }
@@ -755,10 +571,11 @@ class ClientWebSocketManager {
   private updateWsBadge(status: 'active' | 'connecting' | 'offline', label: string) {
     const badge = document.getElementById('regiaWsBadge');
     const txt = document.getElementById('regiaWsText');
+    const state = getTransportState();
     if (badge) {
       badge.className = `regia-ws-badge ${status}`;
-      if (this.currentWsUrl) {
-        badge.title = `WebSocket Live: ${this.currentWsUrl}`;
+      if (state.wsUrl) {
+        badge.title = `WebSocket Live: ${state.wsUrl}`;
       }
     }
     if (txt) {
@@ -775,7 +592,7 @@ class ClientWebSocketManager {
       if (bars) bars.className = 'ws-signal-bars';
       if (pill) pill.className = 'ws-latency-pill';
       if (val) val.textContent = '... ms';
-    } else if (status === 'active' && this.currentLatency === 0) {
+    } else if (status === 'active' && state.latencyMs === 0) {
       if (bars) bars.className = 'ws-signal-bars excellent';
       if (pill) pill.className = 'ws-latency-pill excellent';
     }
