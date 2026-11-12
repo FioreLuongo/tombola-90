@@ -3,10 +3,16 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 
+function normalizeBasePath(raw?: string): string {
+  const trimmed = (raw || '/').trim();
+  if (!trimmed || trimmed === '/') return '/';
+  return `/${trimmed.replace(/^\/+|\/+$/g, '')}/`;
+}
+
 export default defineConfig(() => {
   const configuredHostingUrl = process.env.VITE_APP_URL || process.env.APP_URL || '';
   return {
-    base: process.env.VITE_BASE_PATH || '/',
+    base: normalizeBasePath(process.env.VITE_BASE_PATH),
     define: {
       __APP_HOSTING_URL__: JSON.stringify(configuredHostingUrl),
     },
