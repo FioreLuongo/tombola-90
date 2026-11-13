@@ -884,10 +884,10 @@ function startTombolaApp() {
         aiIntelligenceEnabled = !aiIntelligenceEnabled;
         const btn = document.getElementById('aiIntelligenceBtn');
         if (aiIntelligenceEnabled) {
-            btn.classList.add('active');
+            if (btn) btn.classList.add('active');
             if (generatedCartelle.length > 0) analyzeAllCartelleAdvanced();
         } else {
-            btn.classList.remove('active');
+            if (btn) btn.classList.remove('active');
         }
     }
 
@@ -940,16 +940,17 @@ function startTombolaApp() {
     function toggleVoice() {
         voiceEnabled = !voiceEnabled;
         const btn = document.getElementById('voiceControlBtn');
+        if (!btn) return;
         const icon = btn.querySelector('i');
         const text = btn.querySelector('span');
         if (voiceEnabled) {
-            icon.className = 'fas fa-volume-up';
+            if (icon) icon.className = 'fas fa-volume-up';
             btn.classList.remove('muted');
-            text.textContent = currentLanguage === 'it' ? 'Voce' : 'Voice';
+            if (text) text.textContent = currentLanguage === 'it' ? 'Voce' : 'Voice';
         } else {
-            icon.className = 'fas fa-volume-mute';
+            if (icon) icon.className = 'fas fa-volume-mute';
             btn.classList.add('muted');
-            text.textContent = currentLanguage === 'it' ? 'Muto' : 'Mute';
+            if (text) text.textContent = currentLanguage === 'it' ? 'Muto' : 'Mute';
         }
     }
 
@@ -3734,7 +3735,7 @@ function startTombolaApp() {
             showCartelleSection();
         });
 
-        document.getElementById('navHomeLink').addEventListener('click', function(e) {
+        document.getElementById('navHomeLink')?.addEventListener('click', function(e) {
             e.preventDefault();
             if (document.getElementById('cartelleSection').classList.contains('active')) hideCartelleSection();
             if (document.getElementById('regiaSection').classList.contains('active')) closeRegia();
@@ -4461,15 +4462,15 @@ function startTombolaApp() {
             }
         });
 
-        document.getElementById('voiceControlBtn').addEventListener('click', function() {
+        document.getElementById('voiceControlBtn')?.addEventListener('click', function() {
             toggleVoice();
             syncRegiaUI();
         });
-        document.getElementById('aiIntelligenceBtn').addEventListener('click', function() {
+        document.getElementById('aiIntelligenceBtn')?.addEventListener('click', function() {
             toggleAIIntelligence();
             syncRegiaUI();
         });
-        document.getElementById('aiIntelligenceBtn').addEventListener('dblclick', function(e) {
+        document.getElementById('aiIntelligenceBtn')?.addEventListener('dblclick', function(e) {
             e.preventDefault();
             showAIAnalysisPanel();
         });
