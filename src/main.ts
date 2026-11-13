@@ -191,6 +191,7 @@ class ClientWebSocketManager {
           status,
           clientCount,
           fallbackActive,
+          staticHostMode: transport.staticHostMode,
           wsUrl: transport.wsUrl,
           latencyMs: status === 'connected' ? transport.latencyMs : 0,
         });
@@ -204,6 +205,7 @@ class ClientWebSocketManager {
           status: 'connected',
           wsUrl,
           fallbackActive: false,
+          staticHostMode: false,
         });
         const usedRelativeFallback = isRelativeFallbackActive();
         console.log(
@@ -220,6 +222,7 @@ class ClientWebSocketManager {
         regiaStateManager.syncConnectionState({
           wsUrl: relativeUrl,
           fallbackActive: false,
+          staticHostMode: false,
         });
         console.warn(`[WS-Fallback] ${reason} -> tentativo fallback relativo su ${relativeUrl}`);
         regiaStateManager.addLog(
@@ -227,9 +230,25 @@ class ClientWebSocketManager {
           'warn'
         );
       },
+      onStaticHostMode: (reason: string) => {
+        this.startupVerified = true;
+        this.clearStartupCheckTimer();
+        this.hideUnreachableNotification();
+        regiaStateManager.syncConnectionState({
+          status: 'disconnected',
+          fallbackActive: true,
+          staticHostMode: true,
+          wsUrl: null,
+          latencyMs: 0,
+        });
+        console.info(`[WS-Startup] ${reason}`);
+        regiaStateManager.addLog(`📡 ${reason}`, 'info');
+      },
       onFallbackActivated: (reason: string) => {
         this.clearStartupCheckTimer();
-        regiaStateManager.syncConnectionState({ fallbackActive: true });
+        const transport = getTransportState();
+        if (transport.staticHostMode) return;
+        regiaStateManager.syncConnectionState({ fallbackActive: true, staticHostMode: false });
         this.notifyServerUnreachable(reason);
       },
       onLatency: (latencyMs: number) => {
@@ -243,6 +262,7 @@ class ClientWebSocketManager {
           clientCount: count,
           wsUrl: transport.wsUrl,
           fallbackActive: transport.fallbackActive,
+          staticHostMode: transport.staticHostMode,
         });
       },
       onRawLog: (message, level) => {
@@ -270,8 +290,8 @@ class ClientWebSocketManager {
   /**
    * Verifica la connessione WebSocket all'avvio:
    * - Registra ambiente/URL nel log console e RegiaStateManager
-   * - Se il server è irraggiungibile entro timeoutMs, conferma fallback BroadcastChannel
-   *   e mostra la notifica nella UI della Regia.
+   * - Se il server è irraggiungibile entro timeoutMs (e non siamo su host statico),
+   *   conferma fallback BroadcastChannel e mostra la notifica nella UI della Regia.
    */
   public verifyWebSocketConnectionOnStartup(timeoutMs: number = STARTUP_CHECK_TIMEOUT_MS) {
     this.clearStartupCheckTimer();
@@ -280,14 +300,14 @@ class ClientWebSocketManager {
     const targetUrl = state.wsUrl || cfg.wsUrl;
 
     console.info(
-      `[WS-Startup] Verifica connessione all'avvio | ambiente=${cfg.environment} | appUrl=${cfg.appUrl} | wsUrl=${targetUrl || 'non configurato'} | fallback=${state.fallbackActive}`
+      `[WS-Startup] Verifica connessione all'avvio | ambiente=${cfg.environment} | appUrl=${cfg.appUrl} | wsUrl=${targetUrl || 'non configurato'} | fallback=${state.fallbackActive} | staticHost=${state.staticHostMode}`
     );
     regiaStateManager.addLog(
       `Verifica WebSocket all'avvio (${cfg.environment.toUpperCase()}): ${targetUrl || 'nessun server remoto -> BroadcastChannel'}`,
       'info'
     );
 
-    if (state.status === 'connected') {
+    if (state.status === 'connected' || state.staticHostMode) {
       this.startupVerified = true;
       this.hideUnreachableNotification();
       return;
@@ -297,7 +317,7 @@ class ClientWebSocketManager {
 
     this.startupCheckTimer = setTimeout(() => {
       const current = getTransportState();
-      if (!this.startupVerified && current.status !== 'connected') {
+      if (!this.startupVerified && current.status !== 'connected' && !current.staticHostMode) {
         this.notifyServerUnreachable(
           `Server WebSocket irraggiungibile su ${targetUrl} (timeout ${Math.round(timeoutMs / 1000)}s). Attivo fallback locale BroadcastChannel.`
         );

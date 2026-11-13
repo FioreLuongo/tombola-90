@@ -28,6 +28,7 @@ export interface ResolvedAppConfig {
   relativeWsPath: string;
   relativeWsUrl: string | null;
   healthCheckUrl: string;
+  hasExplicitExternalWsOverride: boolean;
 }
 
 const DEFAULT_RELATIVE_WS_PATH = '/ws';
@@ -211,6 +212,29 @@ export function resolveRuntimeAppConfig(overrides: RuntimeConfigOverrides = {}):
       ? `${effectiveAppOrigin.replace(/\/+$/, '')}${DEFAULT_RELATIVE_HEALTH_PATH}`
       : DEFAULT_RELATIVE_HEALTH_PATH;
 
+  let hasExplicitQueryWs = false;
+  if (search) {
+    try {
+      const params = new URLSearchParams(search);
+      hasExplicitQueryWs = Boolean(normalizeToWsUrl(params.get('ws') || params.get('wsUrl')));
+    } catch {
+      hasExplicitQueryWs = false;
+    }
+  }
+  const hasExplicitStoredWs = Boolean(normalizeToWsUrl(storedWsUrl));
+  let isCrossHostExplicitWs = false;
+  if (wsUrl && windowHostname) {
+    try {
+      const parsedWsHost = new URL(wsUrl).hostname;
+      if (parsedWsHost && parsedWsHost.toLowerCase() !== windowHostname.toLowerCase()) {
+        isCrossHostExplicitWs = true;
+      }
+    } catch {
+      isCrossHostExplicitWs = false;
+    }
+  }
+  const hasExplicitExternalWsOverride = hasExplicitQueryWs || hasExplicitStoredWs || isCrossHostExplicitWs;
+
   return {
     environment: isLocal ? 'local' : 'cloud',
     viteAppUrl,
@@ -220,7 +244,31 @@ export function resolveRuntimeAppConfig(overrides: RuntimeConfigOverrides = {}):
     relativeWsPath: DEFAULT_RELATIVE_WS_PATH,
     relativeWsUrl,
     healthCheckUrl,
+    hasExplicitExternalWsOverride,
   };
+}
+
+export function deriveHealthCheckUrlFromWsUrl(
+  wsUrl: string | null | undefined,
+  fallbackHealthUrl: string = DEFAULT_RELATIVE_HEALTH_PATH
+): string {
+  if (!wsUrl) return fallbackHealthUrl;
+  const trimmed = wsUrl.trim();
+  if (!trimmed || trimmed.startsWith('/')) {
+    return fallbackHealthUrl;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === 'wss:') parsed.protocol = 'https:';
+    else if (parsed.protocol === 'ws:') parsed.protocol = 'http:';
+    const basePath = parsed.pathname.replace(/\/ws\/?$/i, '').replace(/\/+$/, '');
+    parsed.pathname = `${basePath}${DEFAULT_RELATIVE_HEALTH_PATH}`;
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    return fallbackHealthUrl;
+  }
 }
 
 export function getAppBaseUrl(): string {

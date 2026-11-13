@@ -124,6 +124,7 @@ export interface RegiaStateSnapshot {
     latencyMs: number;
     wsUrl: string | null;
     fallbackActive: boolean;
+    staticHostMode: boolean;
   };
   logs: RegiaLogEntry[];
 }
@@ -381,6 +382,7 @@ export function createInitialRegiaState(): RegiaStateSnapshot {
       latencyMs: 0,
       wsUrl: null,
       fallbackActive: false,
+      staticHostMode: false,
     },
     logs: [
       {
@@ -1149,7 +1151,7 @@ export class RegiaStateManager {
 
   private renderConnectionHeaderToDOM() {
     if (typeof document === 'undefined') return;
-    const { status, clientCount, latencyMs, wsUrl, fallbackActive } = this.state.connection;
+    const { status, clientCount, latencyMs, wsUrl, fallbackActive, staticHostMode } = this.state.connection;
 
     const badge = document.getElementById('regiaWsBadge');
     const txt = document.getElementById('regiaWsText');
@@ -1158,24 +1160,41 @@ export class RegiaStateManager {
     const val = document.getElementById('wsLatencyVal');
     const dot = document.getElementById('wsHeartbeatDot');
 
-    const badgeState: 'active' | 'connecting' | 'offline' =
-      status === 'connected' ? 'active' : status === 'connecting' ? 'connecting' : 'offline';
+    const badgeState: 'active' | 'local-sync' | 'connecting' | 'offline' =
+      status === 'connected'
+        ? 'active'
+        : staticHostMode
+          ? 'local-sync'
+          : status === 'connecting'
+            ? 'connecting'
+            : 'offline';
     const label =
       status === 'connected'
         ? `WS Live (${clientCount} ${clientCount === 1 ? 'schermo' : 'schermi'})`
-        : status === 'connecting'
-          ? 'Connessione WS...'
-          : fallbackActive
-            ? 'WS Locale (Fallback)'
-            : 'WS In Riconnessione...';
+        : staticHostMode
+          ? 'Sync Locale (Attivo)'
+          : status === 'connecting'
+            ? 'Connessione WS...'
+            : fallbackActive
+              ? 'WS Locale (Fallback)'
+              : 'WS In Riconnessione...';
 
     if (badge) {
       badge.className = `regia-ws-badge ${badgeState}`;
-      if (wsUrl) badge.title = `WebSocket Live: ${wsUrl}`;
+      if (staticHostMode) {
+        badge.title =
+          'Modalità Host Statico: Regia e TV Studio (2° Monitor) sincronizzati via BroadcastChannel nello stesso browser. Per WebSocket multi-dispositivo pubblica come Node Web Service (render.yaml).';
+      } else if (wsUrl) {
+        badge.title = `WebSocket Live: ${wsUrl}`;
+      }
     }
     if (txt) txt.textContent = label;
 
-    if (badgeState === 'offline') {
+    if (badgeState === 'local-sync') {
+      if (bars) bars.className = 'ws-signal-bars local-sync';
+      if (pill) pill.className = 'ws-latency-pill local-sync';
+      if (val) val.textContent = 'Locale';
+    } else if (badgeState === 'offline') {
       if (bars) bars.className = 'ws-signal-bars offline';
       if (pill) pill.className = 'ws-latency-pill offline';
       if (val) val.textContent = '-- ms';

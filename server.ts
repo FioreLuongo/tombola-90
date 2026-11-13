@@ -328,6 +328,8 @@ app.use(express.json());
 
 // API Status endpoint
 app.get('/api/health', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.json({
     status: 'ok',
     game: 'Tombola-90 Gold Edition',

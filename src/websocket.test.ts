@@ -6,6 +6,8 @@ import {
   initWebSocket,
   isBroadcastFallbackActive,
   isRelativeFallbackActive,
+  isStaticHostModeActive,
+  probeBackendWebSocketCapability,
   resolvePrimaryWsEndpoint,
   sendRealtimeMessage,
 } from './websocket.ts';
@@ -23,9 +25,10 @@ class MockBroadcastChannel {
   close() {}
 }
 
-test('initWebSocket activates BroadcastChannel fallback when wsUrl is unavailable', () => {
+test('initWebSocket activates staticHostMode BroadcastChannel sync without error alert when wsUrl is unavailable', () => {
   disconnectWebSocket(true);
-  let fallbackReason = '';
+  let staticReason = '';
+  let unreachableAlerts = 0;
   const channelInstance: MockBroadcastChannel[] = [];
 
   class TrackedChannel extends MockBroadcastChannel {
@@ -38,14 +41,20 @@ test('initWebSocket activates BroadcastChannel fallback when wsUrl is unavailabl
   const state = initWebSocket({
     wsUrlOverride: null,
     BroadcastChannelImpl: TrackedChannel as unknown as typeof BroadcastChannel,
-    onFallbackActivated: (reason) => {
-      fallbackReason = reason;
+    onStaticHostMode: (reason) => {
+      staticReason = reason;
+    },
+    onFallbackActivated: () => {
+      unreachableAlerts++;
     },
   });
 
   assert.equal(state.fallbackActive, true);
+  assert.equal(state.staticHostMode, true);
   assert.equal(isBroadcastFallbackActive(), true);
-  assert.ok(fallbackReason.length > 0);
+  assert.equal(isStaticHostModeActive(), true);
+  assert.equal(unreachableAlerts, 0);
+  assert.ok(staticReason.length > 0);
 
   sendRealtimeMessage({ type: 'REGIA_EXTRACT', number: 42 });
   assert.equal(channelInstance[0].postedMessages.length, 1);
@@ -292,3 +301,138 @@ test('initWebSocket catches missing WebSocket API in try-catch and falls back to
   assert.equal(channels[0].postedMessages[0].number, 90);
   disconnectWebSocket(true);
 });
+
+test('probeBackendWebSocketCapability classifies 404 and HTML SPA rewrites as static_only, JSON ok as ws_ready', async () => {
+  const fetch404 = (async () =>
+    new Response('Not Found', { status: 404, headers: { 'content-type': 'text/plain' } })) as unknown as typeof fetch;
+  assert.equal(await probeBackendWebSocketCapability('https://tombola-90.onrender.com/api/health', fetch404), 'static_only');
+
+  const fetchHtmlRewrite = (async () =>
+    new Response('<!doctype html>', { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } })) as unknown as typeof fetch;
+  assert.equal(
+    await probeBackendWebSocketCapability('https://tombola-90.onrender.com/api/health', fetchHtmlRewrite),
+    'static_only'
+  );
+
+  const fetchJsonReady = (async () =>
+    new Response(JSON.stringify({ status: 'ok', game: 'Tombola-90 Gold Edition' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })) as unknown as typeof fetch;
+  assert.equal(
+    await probeBackendWebSocketCapability('https://tombola-90.onrender.com/api/health', fetchJsonReady),
+    'ws_ready'
+  );
+
+  const fetchDown = (async () =>
+    new Response('Bad Gateway', { status: 502, headers: { 'content-type': 'text/plain' } })) as unknown as typeof fetch;
+  assert.equal(
+    await probeBackendWebSocketCapability('https://tombola-90.onrender.com/api/health', fetchDown),
+    'unknown'
+  );
+});
+
+test('initWebSocket skips WS handshake and activates clean staticHostMode when /api/health returns 404 (Render Static Site)', () => {
+  disconnectWebSocket(true);
+  let wsAttempts = 0;
+  let staticModeFired = false;
+  let unreachableAlerts = 0;
+
+  class CountingWebSocket {
+    public readyState = 0;
+    public onopen: (() => void) | null = null;
+    public onerror: (() => void) | null = null;
+    public onclose: (() => void) | null = null;
+    public onmessage: ((ev: MessageEvent) => void) | null = null;
+    constructor(_url: string) {
+      wsAttempts++;
+    }
+    send() {}
+    close() {}
+  }
+
+  const fetch404 = (async () =>
+    new Response('Not Found', { status: 404, headers: { 'content-type': 'text/plain' } })) as unknown as typeof fetch;
+
+  initWebSocket({
+    wsUrlOverride: 'wss://tombola-90.onrender.com/ws',
+    healthCheckUrlOverride: 'https://tombola-90.onrender.com/api/health',
+    enablePreFlightProbe: true,
+    fetchImpl: fetch404,
+    WebSocketImpl: CountingWebSocket as unknown as typeof WebSocket,
+    BroadcastChannelImpl: MockBroadcastChannel as unknown as typeof BroadcastChannel,
+    onStaticHostMode: () => {
+      staticModeFired = true;
+    },
+    onFallbackActivated: () => {
+      unreachableAlerts++;
+    },
+  });
+
+  return new Promise<void>((resolve) => {
+    setTimeout(() => {
+      const state = getTransportState();
+      assert.equal(wsAttempts, 0);
+      assert.equal(staticModeFired, true);
+      assert.equal(unreachableAlerts, 0);
+      assert.equal(state.staticHostMode, true);
+      assert.equal(state.fallbackActive, true);
+      disconnectWebSocket(true);
+      resolve();
+    }, 25);
+  });
+});
+
+test('initWebSocket proceeds to WebSocket connection when /api/health returns JSON ok (Render Web Service)', () => {
+  disconnectWebSocket(true);
+  let wsAttempts = 0;
+  let connectedUrl = '';
+
+  class HealthyWebSocket {
+    public readyState = 1;
+    public onopen: (() => void) | null = null;
+    public onerror: (() => void) | null = null;
+    public onclose: (() => void) | null = null;
+    public onmessage: ((ev: MessageEvent) => void) | null = null;
+    constructor(_url: string) {
+      wsAttempts++;
+      queueMicrotask(() => {
+        this.onopen?.();
+      });
+    }
+    send() {}
+    close() {}
+  }
+
+  const fetchOk = (async () =>
+    new Response(JSON.stringify({ status: 'ok', game: 'Tombola-90 Gold Edition' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })) as unknown as typeof fetch;
+
+  initWebSocket({
+    wsUrlOverride: 'wss://tombola-90.onrender.com/ws',
+    healthCheckUrlOverride: 'https://tombola-90.onrender.com/api/health',
+    enablePreFlightProbe: true,
+    fetchImpl: fetchOk,
+    WebSocketImpl: HealthyWebSocket as unknown as typeof WebSocket,
+    BroadcastChannelImpl: MockBroadcastChannel as unknown as typeof BroadcastChannel,
+    onConnected: (url) => {
+      connectedUrl = url;
+    },
+  });
+
+  return new Promise<void>((resolve) => {
+    setTimeout(() => {
+      const state = getTransportState();
+      assert.equal(wsAttempts, 1);
+      assert.equal(connectedUrl, 'wss://tombola-90.onrender.com/ws');
+      assert.equal(state.status, 'connected');
+      assert.equal(state.staticHostMode, false);
+      assert.equal(state.fallbackActive, false);
+      disconnectWebSocket(true);
+      resolve();
+    }, 25);
+  });
+});
+

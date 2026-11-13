@@ -1,5 +1,6 @@
 import {
   CUSTOM_WS_STORAGE_KEY,
+  deriveHealthCheckUrlFromWsUrl,
   getAppBaseUrl,
   getRelativeWebSocketUrl,
   resolveRuntimeAppConfig,
@@ -14,11 +15,15 @@ const HEARTBEAT_INTERVAL_MS = 3500;
 const DEFAULT_SILENT_STARTUP_RETRIES = 2;
 const INITIAL_RETRY_DELAY_MS = 600;
 const EXTERNAL_HANDSHAKE_TIMEOUT_MS = 2000;
+const HEALTH_PROBE_TIMEOUT_MS = 2200;
+
+export type BackendCapability = 'ws_ready' | 'static_only' | 'unknown';
 
 export interface WebSocketTransportState {
   status: ConnectionStatus;
   fallbackActive: boolean;
   relativeFallbackActive: boolean;
+  staticHostMode: boolean;
   wsUrl: string | null;
   relativeWsUrl: string | null;
   hostingUrl: string;
@@ -31,11 +36,15 @@ export interface InitWebSocketOptions {
   wsUrlOverride?: string | null;
   relativeWsUrlOverride?: string | null;
   definedAppWsUrlOverride?: string;
+  healthCheckUrlOverride?: string | null;
+  enablePreFlightProbe?: boolean;
+  fetchImpl?: typeof fetch;
   silentStartupRetries?: number;
   role?: 'regia' | 'tv';
   onMessage?: (data: RealtimeMessage, origin: 'websocket' | 'broadcast_channel') => void;
   onStatusChange?: (status: ConnectionStatus, clientCount: number, fallbackActive: boolean) => void;
   onRelativeFallbackActivated?: (relativeUrl: string, reason: string) => void;
+  onStaticHostMode?: (reason: string) => void;
   onFallbackActivated?: (reason: string, wsUrl: string | null) => void;
   onConnected?: (wsUrl: string) => void;
   onLatency?: (latencyMs: number) => void;
@@ -52,6 +61,8 @@ let connectTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 let pingTimer: ReturnType<typeof setInterval> | null = null;
 let isConnecting = false;
 let reconnectAttempts = 0;
+let connectionEpoch = 0;
+let hasCompletedHealthProbe = false;
 
 /**
  * Flag di fallback automatico su URL relativo (/ws -> host corrente)
@@ -65,11 +76,18 @@ let useRelativeFallback = false;
  */
 let useBroadcastFallback = false;
 
+/**
+ * Flag di modalità host statico (es. Render Static Site, Cloudflare Pages, Firebase Hosting):
+ * nessun backend Express/WS su /api/health e /ws -> usa BroadcastChannel senza mostrare errori.
+ */
+let useStaticHostMode = false;
+
 let activeOptions: InitWebSocketOptions = {};
 let transportState: WebSocketTransportState = {
   status: 'disconnected',
   fallbackActive: false,
   relativeFallbackActive: false,
+  staticHostMode: false,
   wsUrl: null,
   relativeWsUrl: null,
   hostingUrl: '',
@@ -77,6 +95,45 @@ let transportState: WebSocketTransportState = {
   latencyMs: 0,
   lastError: null,
 };
+
+export async function probeBackendWebSocketCapability(
+  healthUrl: string,
+  fetchImpl?: typeof fetch,
+  timeoutMs: number = HEALTH_PROBE_TIMEOUT_MS
+): Promise<BackendCapability> {
+  const fn = fetchImpl ?? (typeof fetch !== 'undefined' ? fetch : undefined);
+  if (!fn || !healthUrl) return 'unknown';
+
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
+  try {
+    const res = await fn(healthUrl, {
+      method: 'GET',
+      cache: 'no-store',
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+
+    if (res.status === 404 || res.status === 405 || res.status === 501) {
+      return 'static_only';
+    }
+
+    const contentType = (res.headers?.get?.('content-type') || '').toLowerCase();
+    if (res.ok && !contentType.includes('application/json')) {
+      // Es. SPA rewrite (/* -> /index.html) che restituisce text/html su /api/health
+      return 'static_only';
+    }
+
+    if (res.ok && contentType.includes('application/json')) {
+      return 'ws_ready';
+    }
+
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 function ensureBroadcastChannel(BroadcastChannelCtor?: typeof BroadcastChannel): BroadcastChannel | null {
   if (broadcastChannel) return broadcastChannel;
@@ -142,6 +199,28 @@ function clearConnectTimeout() {
   }
 }
 
+function clearReconnectTimer() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function cleanupActiveSocket() {
+  if (ws) {
+    try {
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onclose = null;
+      ws.close();
+    } catch {
+      // Ignore cleanup close error
+    }
+    ws = null;
+  }
+}
+
 function startHeartbeat() {
   stopHeartbeat();
   const sendPing = () => {
@@ -158,14 +237,17 @@ function startHeartbeat() {
 }
 
 function scheduleReconnect() {
-  if (reconnectTimer) clearTimeout(reconnectTimer);
+  if (useStaticHostMode) return;
+  clearReconnectTimer();
   const silentRetries = activeOptions.silentStartupRetries ?? DEFAULT_SILENT_STARTUP_RETRIES;
   const delay =
     reconnectAttempts < silentRetries
       ? INITIAL_RETRY_DELAY_MS * (reconnectAttempts + 1)
       : Math.min(1000 * Math.pow(1.5, Math.max(0, reconnectAttempts - silentRetries)), MAX_RECONNECT_DELAY_MS);
   reconnectAttempts++;
+  const epochAtSchedule = connectionEpoch;
   reconnectTimer = setTimeout(() => {
+    if (epochAtSchedule !== connectionEpoch || useStaticHostMode) return;
     useRelativeFallback = false;
     transportState.relativeFallbackActive = false;
     connectInternal();
@@ -179,7 +261,29 @@ function enableBroadcastBackupSilently(reason: string) {
   ensureBroadcastChannel(activeOptions.BroadcastChannelImpl);
 }
 
+function activateStaticHostMode(reason: string) {
+  clearConnectTimeout();
+  clearReconnectTimer();
+  stopHeartbeat();
+  cleanupActiveSocket();
+  isConnecting = false;
+  useRelativeFallback = false;
+  useBroadcastFallback = true;
+  useStaticHostMode = true;
+  transportState.staticHostMode = true;
+  transportState.fallbackActive = true;
+  transportState.relativeFallbackActive = false;
+  transportState.status = 'disconnected';
+  transportState.wsUrl = null;
+  transportState.lastError = null;
+  ensureBroadcastChannel(activeOptions.BroadcastChannelImpl);
+  activeOptions.onRawLog?.(`[Sync Locale] ${reason}`, 'info');
+  activeOptions.onStaticHostMode?.(reason);
+  activeOptions.onStatusChange?.('disconnected', transportState.clientCount, true);
+}
+
 function activateBroadcastFallback(reason: string, wsUrl: string | null, notifyUi: boolean = true) {
+  if (useStaticHostMode) return;
   enableBroadcastBackupSilently(reason);
   activeOptions.onRawLog?.(`[WebSocket] Fallback BroadcastChannel attivato: ${reason}`, 'warn');
   if (notifyUi) {
@@ -219,16 +323,33 @@ export function resolvePrimaryWsEndpoint(
   }).wsUrl;
 }
 
-function resolveConnectionUrls(): { primaryUrl: string | null; relativeUrl: string | null } {
+function resolveConnectionUrls(): {
+  primaryUrl: string | null;
+  relativeUrl: string | null;
+  cfg: ResolvedAppConfig;
+} {
+  const configuredWsUrl =
+    activeOptions.definedAppWsUrlOverride !== undefined
+      ? activeOptions.definedAppWsUrlOverride.trim()
+      : getDefinedAppWsUrl();
+  const cfg = resolveRuntimeAppConfig({ configuredWsUrl });
+
   const primaryUrl =
     activeOptions.wsUrlOverride !== undefined
       ? activeOptions.wsUrlOverride
-      : resolvePrimaryWsEndpoint(activeOptions.definedAppWsUrlOverride);
+      : cfg.wsUrl;
   const relativeUrl =
     activeOptions.relativeWsUrlOverride !== undefined
       ? activeOptions.relativeWsUrlOverride
-      : getRelativeWebSocketUrl();
-  return { primaryUrl, relativeUrl };
+      : cfg.relativeWsUrl;
+  return { primaryUrl, relativeUrl, cfg };
+}
+
+function resolveEffectiveHealthUrl(targetUrl: string | null, cfg: ResolvedAppConfig): string | null {
+  if (activeOptions.healthCheckUrlOverride !== undefined) {
+    return activeOptions.healthCheckUrlOverride;
+  }
+  return deriveHealthCheckUrlFromWsUrl(targetUrl, cfg.healthCheckUrl);
 }
 
 function connectInternal() {
@@ -237,6 +358,8 @@ function connectInternal() {
   let targetUrl: string | null = null;
   let relativeUrl: string | null = null;
   let hostingUrl = '';
+  let cfg: ResolvedAppConfig;
+  const currentEpoch = connectionEpoch;
 
   const canFallbackToRelative = (failedUrl: string | null): boolean =>
     !useRelativeFallback && Boolean(relativeUrl) && relativeUrl !== failedUrl;
@@ -246,18 +369,7 @@ function connectInternal() {
     useRelativeFallback = true;
     transportState.relativeFallbackActive = true;
     transportState.lastError = reason;
-    if (ws) {
-      try {
-        ws.onopen = null;
-        ws.onmessage = null;
-        ws.onerror = null;
-        ws.onclose = null;
-        ws.close();
-      } catch {
-        // Ignore cleanup close error
-      }
-      ws = null;
-    }
+    cleanupActiveSocket();
     isConnecting = false;
     activeOptions.onRawLog?.(
       `[WebSocket] Server esterno (${failedUrl}) irraggiungibile: fallback automatico su URL relativo (${relativeUrl}).`,
@@ -272,6 +384,7 @@ function connectInternal() {
     const resolved = resolveConnectionUrls();
     const primaryUrl = resolved.primaryUrl;
     relativeUrl = resolved.relativeUrl;
+    cfg = resolved.cfg;
     hostingUrl = getAppBaseUrl();
     targetUrl = useRelativeFallback ? relativeUrl : primaryUrl;
 
@@ -281,12 +394,9 @@ function connectInternal() {
     transportState.hostingUrl = hostingUrl;
 
     if (!targetUrl) {
-      transportState.status = 'disconnected';
-      activateBroadcastFallback(
-        'Nessun endpoint WebSocket configurato per questo host: attivo sync locale via BroadcastChannel.',
-        null
+      activateStaticHostMode(
+        'Host statico attivo (nessun endpoint WebSocket remoto): sincronizzazione Regia ↔ Schermo TV attiva via BroadcastChannel locale.'
       );
-      activeOptions.onStatusChange?.('disconnected', transportState.clientCount, true);
       return;
     }
 
@@ -306,130 +416,212 @@ function connectInternal() {
     }
 
     const activeTargetUrl: string = targetUrl;
+    const effectiveHealthUrl = resolveEffectiveHealthUrl(activeTargetUrl, cfg);
+    const shouldPreFlight =
+      !hasCompletedHealthProbe &&
+      !useRelativeFallback &&
+      Boolean(effectiveHealthUrl) &&
+      (activeOptions.enablePreFlightProbe ??
+        (activeOptions.WebSocketImpl === undefined &&
+          cfg.environment === 'cloud' &&
+          !cfg.hasExplicitExternalWsOverride));
 
-    isConnecting = true;
-    transportState.status = 'connecting';
-    activeOptions.onStatusChange?.('connecting', transportState.clientCount, useBroadcastFallback);
-    activeOptions.onRawLog?.(
-      `[WebSocket] Tentativo connessione${useRelativeFallback ? ' (fallback relativo)' : ''} a ${activeTargetUrl}...`,
-      'info'
-    );
+    const openSocketConnection = () => {
+      if (currentEpoch !== connectionEpoch || useStaticHostMode) return;
+      if (isConnecting || (ws && ws.readyState === 1 /* OPEN */)) return;
 
-    const socket = new WebSocketCtor(activeTargetUrl);
-    let failureReported = false;
-    let openedOnce = false;
-    ws = socket;
-
-    if (canFallbackToRelative(activeTargetUrl)) {
-      clearConnectTimeout();
-      connectTimeoutTimer = setTimeout(() => {
-        if (ws === socket && !openedOnce && !failureReported) {
-          failureReported = true;
-          tryRelativeFallback(
-            `Timeout handshake WebSocket esterno (${activeTargetUrl}).`,
-            activeTargetUrl
-          );
-        }
-      }, EXTERNAL_HANDSHAKE_TIMEOUT_MS);
-    }
-
-    socket.onopen = () => {
-      if (ws !== socket) return;
-      clearConnectTimeout();
-      isConnecting = false;
-      openedOnce = true;
-      reconnectAttempts = 0;
-      useBroadcastFallback = false;
-      transportState.fallbackActive = false;
-      transportState.relativeFallbackActive = useRelativeFallback;
-      transportState.lastError = null;
-      transportState.status = 'connected';
-      transportState.wsUrl = activeTargetUrl;
-
+      isConnecting = true;
+      transportState.status = 'connecting';
+      activeOptions.onStatusChange?.('connecting', transportState.clientCount, useBroadcastFallback);
       activeOptions.onRawLog?.(
-        `⚡ [WebSocket] Connesso a ${activeTargetUrl}${useRelativeFallback ? ' (via fallback URL relativo)' : ''} (BroadcastChannel disattivato).`,
+        `[WebSocket] Tentativo connessione${useRelativeFallback ? ' (fallback relativo)' : ''} a ${activeTargetUrl}...`,
         'info'
       );
-      activeOptions.onConnected?.(activeTargetUrl);
-      activeOptions.onStatusChange?.('connected', transportState.clientCount, false);
 
-      sendViaWebSocketOnly({
-        type: 'REGISTER_CLIENT',
-        role: activeOptions.role || 'regia',
-        hostingUrl,
-        timestamp: Date.now(),
-      });
-
-      startHeartbeat();
-    };
-
-    socket.onmessage = (event: MessageEvent) => {
+      let socket: WebSocket;
       try {
-        const parsed = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-        handleRawIncoming(parsed, 'websocket');
+        socket = new WebSocketCtor(activeTargetUrl);
       } catch (err) {
-        activeOptions.onRawLog?.(`[WebSocket] Errore parsing messaggio: ${String(err)}`, 'error');
-      }
-    };
-
-    socket.onclose = () => {
-      if (ws !== socket) return;
-      isConnecting = false;
-      ws = null;
-      stopHeartbeat();
-      transportState.status = 'disconnected';
-
-      const silentRetries = activeOptions.silentStartupRetries ?? DEFAULT_SILENT_STARTUP_RETRIES;
-      const shouldDelayUiAlert = reconnectAttempts < silentRetries;
-
-      if (!openedOnce && !failureReported) {
-        failureReported = true;
-        const reason = `Connessione WebSocket rifiutata o chiusa da ${activeTargetUrl}.`;
+        isConnecting = false;
+        const reason = `Impossibile aprire WebSocket verso ${activeTargetUrl} (${String(err)}).`;
         if (tryRelativeFallback(reason, activeTargetUrl)) {
           return;
         }
-        activateBroadcastFallback(
-          `${reason} Attivo fallback locale BroadcastChannel.`,
-          activeTargetUrl,
-          !shouldDelayUiAlert
-        );
-      } else {
-        useBroadcastFallback = true;
-        transportState.fallbackActive = true;
+        transportState.status = 'error';
+        activateBroadcastFallback(`${reason} Attivo fallback locale BroadcastChannel.`, activeTargetUrl);
+        activeOptions.onStatusChange?.('error', transportState.clientCount, true);
+        scheduleReconnect();
+        return;
       }
 
-      activeOptions.onStatusChange?.(
-        shouldDelayUiAlert ? 'connecting' : 'disconnected',
-        transportState.clientCount,
-        useBroadcastFallback
-      );
-      scheduleReconnect();
-    };
+      let failureReported = false;
+      let openedOnce = false;
+      ws = socket;
 
-    socket.onerror = () => {
-      if (ws !== socket) return;
-      isConnecting = false;
-      const silentRetries = activeOptions.silentStartupRetries ?? DEFAULT_SILENT_STARTUP_RETRIES;
-      const shouldDelayUiAlert = reconnectAttempts < silentRetries;
-      transportState.status = shouldDelayUiAlert ? 'connecting' : 'error';
-      if (!failureReported) {
-        failureReported = true;
-        const reason = `Server WebSocket non raggiungibile su ${activeTargetUrl}.`;
-        if (tryRelativeFallback(reason, activeTargetUrl)) {
+      const checkIfStaticHostAfterFailure = () => {
+        if (
+          hasCompletedHealthProbe ||
+          useStaticHostMode ||
+          useRelativeFallback ||
+          cfg.hasExplicitExternalWsOverride ||
+          !effectiveHealthUrl
+        ) {
           return;
         }
-        activateBroadcastFallback(
-          `${reason} Attivo fallback locale BroadcastChannel.`,
-          activeTargetUrl,
-          !shouldDelayUiAlert
-        );
+        hasCompletedHealthProbe = true;
+        void probeBackendWebSocketCapability(effectiveHealthUrl, activeOptions.fetchImpl).then((capability) => {
+          if (currentEpoch !== connectionEpoch || openedOnce) return;
+          if (capability === 'static_only') {
+            activateStaticHostMode(
+              `Host statico rilevato (${activeTargetUrl} non espone un server WebSocket): sincronizzazione locale Regia ↔ TV Studio attiva via BroadcastChannel.`
+            );
+          }
+        });
+      };
+
+      if (canFallbackToRelative(activeTargetUrl)) {
+        clearConnectTimeout();
+        connectTimeoutTimer = setTimeout(() => {
+          if (ws === socket && !openedOnce && !failureReported) {
+            failureReported = true;
+            tryRelativeFallback(
+              `Timeout handshake WebSocket esterno (${activeTargetUrl}).`,
+              activeTargetUrl
+            );
+          }
+        }, EXTERNAL_HANDSHAKE_TIMEOUT_MS);
       }
-      activeOptions.onStatusChange?.(
-        shouldDelayUiAlert ? 'connecting' : 'error',
-        transportState.clientCount,
-        true
-      );
+
+      socket.onopen = () => {
+        if (ws !== socket || currentEpoch !== connectionEpoch) return;
+        clearConnectTimeout();
+        clearReconnectTimer();
+        isConnecting = false;
+        openedOnce = true;
+        reconnectAttempts = 0;
+        useBroadcastFallback = false;
+        useStaticHostMode = false;
+        hasCompletedHealthProbe = true;
+        transportState.staticHostMode = false;
+        transportState.fallbackActive = false;
+        transportState.relativeFallbackActive = useRelativeFallback;
+        transportState.lastError = null;
+        transportState.status = 'connected';
+        transportState.wsUrl = activeTargetUrl;
+
+        activeOptions.onRawLog?.(
+          `⚡ [WebSocket] Connesso a ${activeTargetUrl}${useRelativeFallback ? ' (via fallback URL relativo)' : ''} (BroadcastChannel disattivato).`,
+          'info'
+        );
+        activeOptions.onConnected?.(activeTargetUrl);
+        activeOptions.onStatusChange?.('connected', transportState.clientCount, false);
+
+        sendViaWebSocketOnly({
+          type: 'REGISTER_CLIENT',
+          role: activeOptions.role || 'regia',
+          hostingUrl,
+          timestamp: Date.now(),
+        });
+
+        startHeartbeat();
+      };
+
+      socket.onmessage = (event: MessageEvent) => {
+        try {
+          const parsed = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+          handleRawIncoming(parsed, 'websocket');
+        } catch (err) {
+          activeOptions.onRawLog?.(`[WebSocket] Errore parsing messaggio: ${String(err)}`, 'error');
+        }
+      };
+
+      socket.onclose = () => {
+        if (ws !== socket || currentEpoch !== connectionEpoch) return;
+        isConnecting = false;
+        ws = null;
+        stopHeartbeat();
+        if (useStaticHostMode) return;
+
+        transportState.status = 'disconnected';
+        const silentRetries = activeOptions.silentStartupRetries ?? DEFAULT_SILENT_STARTUP_RETRIES;
+        const shouldDelayUiAlert = reconnectAttempts < silentRetries;
+
+        if (!openedOnce && !failureReported) {
+          failureReported = true;
+          checkIfStaticHostAfterFailure();
+          const reason = `Connessione WebSocket rifiutata o chiusa da ${activeTargetUrl}.`;
+          if (tryRelativeFallback(reason, activeTargetUrl)) {
+            return;
+          }
+          activateBroadcastFallback(
+            `${reason} Attivo fallback locale BroadcastChannel.`,
+            activeTargetUrl,
+            !shouldDelayUiAlert
+          );
+        } else {
+          useBroadcastFallback = true;
+          transportState.fallbackActive = true;
+        }
+
+        if (useStaticHostMode) return;
+
+        activeOptions.onStatusChange?.(
+          shouldDelayUiAlert ? 'connecting' : 'disconnected',
+          transportState.clientCount,
+          useBroadcastFallback
+        );
+        scheduleReconnect();
+      };
+
+      socket.onerror = () => {
+        if (ws !== socket || currentEpoch !== connectionEpoch || useStaticHostMode) return;
+        isConnecting = false;
+        const silentRetries = activeOptions.silentStartupRetries ?? DEFAULT_SILENT_STARTUP_RETRIES;
+        const shouldDelayUiAlert = reconnectAttempts < silentRetries;
+        transportState.status = shouldDelayUiAlert ? 'connecting' : 'error';
+        if (!failureReported) {
+          failureReported = true;
+          checkIfStaticHostAfterFailure();
+          const reason = `Server WebSocket non raggiungibile su ${activeTargetUrl}.`;
+          if (tryRelativeFallback(reason, activeTargetUrl)) {
+            return;
+          }
+          activateBroadcastFallback(
+            `${reason} Attivo fallback locale BroadcastChannel.`,
+            activeTargetUrl,
+            !shouldDelayUiAlert
+          );
+        }
+        if (useStaticHostMode) return;
+
+        activeOptions.onStatusChange?.(
+          shouldDelayUiAlert ? 'connecting' : 'error',
+          transportState.clientCount,
+          true
+        );
+      };
     };
+
+    if (shouldPreFlight && effectiveHealthUrl) {
+      hasCompletedHealthProbe = true;
+      isConnecting = true;
+      transportState.status = 'connecting';
+      activeOptions.onStatusChange?.('connecting', transportState.clientCount, useBroadcastFallback);
+      void probeBackendWebSocketCapability(effectiveHealthUrl, activeOptions.fetchImpl).then((capability) => {
+        if (currentEpoch !== connectionEpoch) return;
+        isConnecting = false;
+        if (capability === 'static_only') {
+          activateStaticHostMode(
+            'Host statico rilevato (/api/health assente o SPA rewrite): sincronizzazione Regia ↔ Schermo TV attiva via BroadcastChannel locale.'
+          );
+          return;
+        }
+        openSocketConnection();
+      });
+      return;
+    }
+
+    openSocketConnection();
   } catch (err) {
     isConnecting = false;
     const reason = `Impossibile aprire WebSocket verso ${targetUrl} (${String(err)}).`;
@@ -446,37 +638,28 @@ function connectInternal() {
 /**
  * Inizializza la connessione WebSocket usando `__APP_WS_URL__` definito in `vite.config.ts`
  * come endpoint primario (risolto con `src/config.ts`).
- * Se la connessione fallisce (blocco try-catch o handshake rifiutato), tenta l'eventuale
- * URL relativo (/ws) e passa automaticamente a BroadcastChannel come metodo di fallback.
+ * Rileva automaticamente eventuali host statici tramite `/api/health` e attiva `BroadcastChannel`
+ * senza generare falsi allarmi o loop di riconnessione su deploy statici.
  */
 export function initWebSocket(options: InitWebSocketOptions = {}): WebSocketTransportState {
+  connectionEpoch++;
   reconnectAttempts = 0;
   useRelativeFallback = false;
   useBroadcastFallback = false;
-  activeOptions = { ...activeOptions, ...options };
+  useStaticHostMode = false;
+  hasCompletedHealthProbe = false;
+  transportState.staticHostMode = false;
+  activeOptions = { ...options };
   connectInternal();
   return getTransportState();
 }
 
 export function disconnectWebSocket(closeBroadcastChannel: boolean = false) {
+  connectionEpoch++;
   stopHeartbeat();
   clearConnectTimeout();
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
-  if (ws) {
-    try {
-      ws.onopen = null;
-      ws.onmessage = null;
-      ws.onclose = null;
-      ws.onerror = null;
-      ws.close();
-    } catch {
-      // Ignore close errors
-    }
-    ws = null;
-  }
+  clearReconnectTimer();
+  cleanupActiveSocket();
   if (closeBroadcastChannel && broadcastChannel) {
     try {
       broadcastChannel.close();
@@ -487,13 +670,26 @@ export function disconnectWebSocket(closeBroadcastChannel: boolean = false) {
   }
   isConnecting = false;
   useRelativeFallback = false;
+  useStaticHostMode = false;
+  hasCompletedHealthProbe = false;
   transportState.relativeFallbackActive = false;
+  transportState.staticHostMode = false;
   transportState.status = 'disconnected';
 }
 
 export function reconnectWebSocket(): WebSocketTransportState {
+  connectionEpoch++;
   reconnectAttempts = 0;
-  disconnectWebSocket(false);
+  hasCompletedHealthProbe = false;
+  useStaticHostMode = false;
+  useRelativeFallback = false;
+  transportState.staticHostMode = false;
+  transportState.relativeFallbackActive = false;
+  stopHeartbeat();
+  clearConnectTimeout();
+  clearReconnectTimer();
+  cleanupActiveSocket();
+  isConnecting = false;
   connectInternal();
   return getTransportState();
 }
@@ -536,11 +732,16 @@ export function isRelativeFallbackActive(): boolean {
   return useRelativeFallback;
 }
 
+export function isStaticHostModeActive(): boolean {
+  return useStaticHostMode;
+}
+
 export function getTransportState(): WebSocketTransportState {
   return {
     ...transportState,
     fallbackActive: useBroadcastFallback,
     relativeFallbackActive: useRelativeFallback,
+    staticHostMode: useStaticHostMode,
   };
 }
 

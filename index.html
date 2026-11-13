@@ -963,9 +963,9 @@ git push -u origin main</code></pre>
 
       <!-- Sezione 1: Render -->
       <div class="guide-section-block">
-        <h3 class="guide-step-title highlight-blue"><i class="fas fa-server"></i> 1. CONFIGURAZIONE PASSO-PASSO AD HOC SU RENDER (100% Gratis & No-Sleep)</h3>
-        <div class="guide-badge-pill green"><i class="fas fa-check-circle"></i> Vantaggio: I "Static Sites" su Render non vanno mai in sleep e sono gratis per sempre!</div>
-        <p class="guide-text">I file di configurazione sono già pronti nel tuo progetto: il file <code>render.yaml</code> nella radice definisce la compilazione con Vite e i redirect per la Single Page Application.</p>
+        <h3 class="guide-step-title highlight-blue"><i class="fas fa-server"></i> 1. CONFIGURAZIONE PASSO-PASSO AD HOC SU RENDER (Web Service con WebSocket Live)</h3>
+        <div class="guide-badge-pill green"><i class="fas fa-check-circle"></i> WebSocket Real-Time (/ws) attivo tra Regia e TV Studio su qualsiasi dispositivo!</div>
+        <p class="guide-text">Il file <code>render.yaml</code> nella radice è già configurato come <b>Web Service Node.js</b> per compilare Vite ed eseguire <code>server.ts</code> (con WebSocket Live <code>wss://.../ws</code> e check <code>/api/health</code>). Se invece pubblichi come Static Site, il gioco attiva automaticamente la sincronizzazione locale <code>BroadcastChannel</code> senza errori.</p>
         
         <div class="guide-step-cards">
           <div class="step-mini-card">
@@ -974,7 +974,7 @@ git push -u origin main</code></pre>
           </div>
           <div class="step-mini-card">
             <span class="step-num">2</span>
-            <div>Nella Dashboard di Render, clicca in alto a destra su <b>+ New</b> ➔ seleziona <b>"Static Site"</b>.</div>
+            <div>Nella Dashboard di Render, clicca in alto a destra su <b>+ New</b> ➔ seleziona <b>"Web Service"</b> (oppure <b>"Blueprint"</b> per leggere <code>render.yaml</code> automaticamente).</div>
           </div>
           <div class="step-mini-card">
             <span class="step-num">3</span>
@@ -983,26 +983,25 @@ git push -u origin main</code></pre>
           <div class="step-mini-card">
             <span class="step-num">4</span>
             <div>
-              Compila i parametri richiesti (quasi tutti rilevati in automatico):
+              Verifica i parametri di avvio Node + WebSocket:
               <ul class="sub-list">
                 <li><b>Name:</b> <code>tombola-90</code></li>
-                <li><b>Branch:</b> <code>main</code></li>
-                <li><b>Root Directory:</b> (lascia vuoto)</li>
-                <li><b>Build Command:</b> <code>npm run build</code></li>
-                <li><b>Publish Directory:</b> <code>dist</code></li>
+                <li><b>Runtime:</b> <code>Node</code></li>
+                <li><b>Build Command:</b> <code>npm install --include=dev &amp;&amp; npm run build</code></li>
+                <li><b>Start Command:</b> <code>npm start</code></li>
+                <li><b>Health Check Path:</b> <code>/api/health</code></li>
               </ul>
             </div>
           </div>
           <div class="step-mini-card">
             <span class="step-num">5</span>
             <div>
-              Verifica Rewrite SPA: in basso nella sezione <b>Advanced ➔ Redirects/Rewrites</b>, grazie a <code>render.yaml</code> troverai già configurato:
-              <br><code>Source: /*</code> ➔ <code>Destination: /index.html</code> (Action: <b>Rewrite</b>).
+              Aggiungi variabile ambiente <code>NODE_ENV = production</code> (già definita in <code>render.yaml</code>). Il server attiverà subito sia la Web UI che <code>wss://tombola-90.onrender.com/ws</code>.
             </div>
           </div>
           <div class="step-mini-card">
             <span class="step-num">6</span>
-            <div>Clicca sul pulsante <b>"Create Static Site"</b>. In circa 60 secondi il sito sarà online su: <br><span class="url-badge">https://tombola-90.onrender.com</span></div>
+            <div>Clicca sul pulsante <b>"Deploy Web Service"</b>. In pochi minuti il sito e il WebSocket saranno online su: <br><span class="url-badge">https://tombola-90.onrender.com</span></div>
           </div>
         </div>
       </div>
