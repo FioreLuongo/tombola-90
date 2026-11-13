@@ -198,7 +198,7 @@ function startTombolaApp() {
 
     const translations = {
         it: {
-            appTitle: "LUONGO Tombola 90 Italia - GOLD EDITION", navHome: "Home", navCards: "Cartelle", fullscreenText: "Schermo intero", themeLight: "Light", themeDark: "Dark",
+            appTitle: "Tombola-90", navHome: "Home", navCards: "Cartelle", fullscreenText: "Schermo intero", themeLight: "Light", themeDark: "Dark",
             extractedNumberTitle: "Numero Estratto", lastNumbersTitle: "Ultimi 5", prizePoolTitle: "Montepremi", goldText: "Numero Gold", amboText: "Ambo", ternoText: "Terno",
             quaternaText: "Quaterna", cinquinaText: "Cinquina", tombolaText: "Tombola", winsTitle: "Vincite", winGoldText: "Gold:",
             winAmboText: "Ambo:", winTernoText: "Terno:", winQuaternaText: "Quaterna:", winCinquinaText: "Cinquina:", winTombolaText: "Tombola:", countdownTitle: "Countdown", playText: "Play",
@@ -222,7 +222,7 @@ function startTombolaApp() {
             active: "Attivo", inactive: "Inattivo", unclaimedPotTitle: "Montepremi Non Vinti"
         },
         en: {
-            appTitle: "LUONGO Tombola 90 Italia - GOLD EDITION", navHome: "Home", navCards: "Cards", fullscreenText: "Fullscreen", themeLight: "Light", themeDark: "Dark",
+            appTitle: "Tombola-90", navHome: "Home", navCards: "Cards", fullscreenText: "Fullscreen", themeLight: "Light", themeDark: "Dark",
             extractedNumberTitle: "Extracted Number", lastNumbersTitle: "Last 5", prizePoolTitle: "Prize Pool", goldText: "Gold Number", amboText: "Ambo", ternoText: "Terno",
             quaternaText: "Quaterna", cinquinaText: "Cinquina", tombolaText: "Tombola", winsTitle: "Wins", winGoldText: "Gold:",
             winAmboText: "Ambo:", winTernoText: "Terno:", winQuaternaText: "Quaterna:", winCinquinaText: "Cinquina:", winTombolaText: "Tombola:", countdownTitle: "Countdown", playText: "Play",
