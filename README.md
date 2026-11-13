@@ -1,114 +1,48 @@
-# 🎲 LUONGO TOMBOLA 90 ITALIA - GOLD EDITION
+# 🎲 Tombola-90
 
-Edizione Gold di lusso per **Luongo Tombola 90 Italia** con tabellone TV studio, animazione 3D estrazioni, generatore cartelle A4 (4 colori), Intelligenza Estrazioni, Smorfia Napoletana, Console Regia e **Database Cloud Firebase Firestore** per i Montepremi Non Vinti (Rollover Jackpot).
-
----
-
-## 🔑 Credenziali, Sicurezza & Database
-
-- **Accesso Console Regia:** Protetto da Crittografia SHA-256 (Password riservata all'amministratore)
-- **Database Cloud:** Google Cloud Firebase Firestore (NoSQL)
-- **ID Database Firestore:** `ai-studio-luongotombola90i-7d9a7964-caed-43e3-a2ea-3f12d876f720`
-- **Progetto Firebase:** `agile-lamp-6xq1s`
-- **Costi di Hosting & Database:** **0,00 € (100% Free Forever con GitHub + Render / Vercel / Cloudflare + Firebase Spark)**
+**Tombola-90** è il classico gioco da tavolo della tradizione italiana pensato per riunire famiglia e amici attorno al tabellone, unendo l'atmosfera delle serate di festa alla semplicità di regole immediate per tutte le età.
 
 ---
 
-## 🚀 FASE 1: Inviare il Progetto su GitHub (Passo Comune)
+## 📜 Storia e Tradizione
 
-1. Accedi a [GitHub](https://github.com) (crea un account gratuito se non ne hai uno).
-2. Clicca su **"+"** in alto a destra ➔ **"New repository"**.
-3. Assegna il nome `tombola-90`, seleziona **Public** e clicca su **"Create repository"** (non spuntare "Add README").
-4. Esegui questi comandi nel terminale del tuo progetto:
+Nata a Napoli nel Settecento e tramandata di generazione in generazione, la tombola da 90 numeri è uno dei passatempi familiari più amati d'Italia, immancabile soprattutto durante le festività natalizie, le riunioni di famiglia e le serate in compagnia.
 
-```bash
-git add .
-git commit -m "Luongo Tombola 90 Italia Gold Edition"
-git branch -M main
-git remote add origin https://github.com/TUO-USERNAME/tombola-90.git
-git push -u origin main
-```
-*(Sostituisci `TUO-USERNAME` con il tuo nome utente di GitHub).*
+A ogni numero estratto dal panariello si accompagna spesso la lettura tradizionale della **Smorfia Napoletana**, rendendo ogni estrazione un momento di sorriso, suspence e condivisione tra grandi e piccoli.
 
 ---
 
-## 🌐 FASE 2: Scegli il Tuo Hosting Gratuito Preferito
+## 🧩 Come Funziona il Gioco
 
-### 🟢 OPZIONE A: RENDER (Consigliato - 100% Free & Zero Sleep)
+### Il Tabellone (Numeri da 1 a 90)
+Il cuore del gioco è il **tabellone numerato da 1 a 90**, suddiviso in **6 blocchi** (cartelle madri) da 15 numeri ciascuno, organizzati in righe da 5 numeri e colonne per decine. Mano a mano che i numeri vengono estratti a sorte uno alla volta, vengono segnati sul tabellone principale davanti a tutti i partecipanti.
 
-Render è un hosting cloud di livello professionale. Usiamo la tipologia **Static Site**, che su Render è **completamente gratuita per sempre e non va mai in standby/sleep**!
-
-1. Accedi a **[render.com](https://render.com)** cliccando su **"Get Started"** ➔ **"GitHub"**.
-2. Dalla dashboard clicca in alto a destra su **"+ New"** ➔ seleziona **"Static Site"**.
-3. Clicca **"Connect"** accanto al repository `tombola-90`.
-4. Inserisci questi parametri:
-   - **Name:** `tombola-90`
-   - **Branch:** `main`
-   - **Build Command:** `npm run build`
-   - **Publish Directory:** `dist`
-5. *(Opzionale - Regola SPA)*: Abbiamo già incluso il file `render.yaml` nel progetto che imposta automaticamente il rewrite `/*` ➔ `/index.html`.
-6. Clicca su **"Create Static Site"**.
-7. In circa 1 minuto il tuo sito sarà online con HTTPS su:
-   `https://tombola-90.onrender.com`
+### Le Cartelle dei Giocatori
+Ogni giocatore sceglie una o più **cartelle**:
+- Ciascuna cartella è composta da **3 righe e 9 colonne** per un totale di **15 numeri** distribuiti con **5 numeri per ogni riga**.
+- I numeri sono disposti per colonna secondo le decine (1–9, 10–19, ..., fino a 80–90).
+- Quando il banditore chiama un numero presente sulla propria cartella, il giocatore lo copre o lo segna.
 
 ---
 
-### ⚡ OPZIONE B: VERCEL (1-Click Deploy)
+## 🏆 Le Combinazioni Vincenti
 
-1. Accedi a **[vercel.com](https://vercel.com)** con GitHub.
-2. Dalla dashboard clicca su **"Add New..."** ➔ **"Project"**.
-3. Clicca **"Import"** accanto alla tua repository `tombola-90`.
-4. Vercel rileverà automaticamente Vite (`npm run build`, output: `dist`).
-5. Clicca **"Deploy"**.
-6. Il sito sarà attivo in 30 secondi su:
-   `https://tombola-90.vercel.app`
+Durante la partita i premi si conquistano in progressione ordinata sulla stessa riga di una cartella, fino al completamento dell'intera scheda:
 
----
+| Combinazione | Requisito per la Vincita |
+| :--- | :--- |
+| **Ambo** | 2 numeri estratti sulla stessa riga |
+| **Terno** | 3 numeri estratti sulla stessa riga |
+| **Quaterna** | 4 numeri estratti sulla stessa riga |
+| **Cinquina** | Tutti i 5 numeri estratti su una stessa riga |
+| **Tombola** | Tutti i 15 numeri dell'intera cartella estratti |
 
-### 🛡️ OPZIONE C: CLOUDFLARE PAGES (Velocità Record & Banda Illimitata)
-
-1. Accedi a **[dash.cloudflare.com](https://dash.cloudflare.com)**.
-2. Nel menu a sinistra clicca su **"Workers & Pages"** ➔ scheda **"Pages"** ➔ **"Connect to Git"**.
-3. Seleziona `tombola-90` e clicca **"Begin setup"**.
-4. Impostazioni:
-   - **Framework:** Vite
-   - **Build command:** `npm run build`
-   - **Build output directory:** `dist`
-5. Clicca **"Save and Deploy"** (il file `public/_redirects` è già incluso nel progetto).
-6. Il sito sarà online su `https://tombola-90.pages.dev`.
+In molte varianti familiari è presente anche il **Numero Gold** (o premio speciale), oltre alla tradizionale regola che permette di vincere **un solo premio per riga** prima di passare al traguardo successivo, mantenendo la partita equilibrata e coinvolgente fino all'ultimo numero.
 
 ---
 
-### 🔥 OPZIONE D: FIREBASE HOSTING (Nativo nello stesso account Google)
+## 🎭 Lo Spirito della Serata in Famiglia
 
-Poiché il database è già su Firebase, puoi pubblicare anche il sito web direttamente con Google Firebase Hosting:
-
-```bash
-npm install -g firebase-tools
-firebase login
-npm run build
-firebase deploy --only hosting
-```
-*(Il file `firebase.json` è già preconfigurato nel progetto).*
-
----
-
-## 🔒 FASE 3: Autorizzare il Dominio su Firebase Console
-
-Qualunque hosting tu abbia scelto (Render, Vercel o Cloudflare), per consentire al database di sincronizzare i dati:
-
-1. Apri la **[Console Firebase](https://console.firebase.google.com)** e seleziona il progetto **`agile-lamp-6xq1s`**.
-2. Nel menu a sinistra vai su **Authentication** ➔ scheda **Settings** ➔ **Authorized domains** *(Domini autorizzati)*.
-3. Clicca **"Add domain"** e aggiungi il tuo dominio:
-   - Se usi Render: `tombola-90.onrender.com`
-   - Se usi Vercel: `tombola-90.vercel.app`
-   - Se usi Cloudflare: `tombola-90.pages.dev`
-4. Clicca su **Salva**. Il database Firestore è ora attivo e perfettamente sincronizzato!
-
----
-
-## 📄 Guida Ufficiale in PDF
-
-Una guida illustrata di 3 pagine è disponibile all'interno del progetto:
-- Percorso: `public/Guida_Messa_Online_GitHub_Hosting.pdf`
-- Oppure scaricabile dal pulsante blu **"Guida Online (PDF)"** nella barra superiore della Console Regia.
+- **Chi fa il banco (il Banditore):** mescola i numeri, estrae una pallina o tessera alla volta, annuncia il numero ad alta voce insieme al suo significato nella Smorfia e gestisce l'ordine delle vincite.
+- **I Giocatori:** tengono d'occhio le proprie cartelle, annunciano con entusiasmo *"Ambo!"*, *"Terno!"*, *"Quaterna!"*, *"Cinquina!"* o *"Tombola!"* non appena completano la combinazione e controllano i numeri insieme al banco.
+- **Per tutte le età:** non richiede esperienza né calcoli complessi; bambini, genitori e nonni giocano sullo stesso piano, condividendo l'attesa di quell'ultimo numero mancante.
