@@ -6,6 +6,7 @@ import {
   initWebSocket,
   isBroadcastFallbackActive,
   isRelativeFallbackActive,
+  resolvePrimaryWsEndpoint,
   sendRealtimeMessage,
 } from './websocket.ts';
 
@@ -247,4 +248,47 @@ test('initWebSocket recovers from transient startup handshake refusal on silent 
       resolve();
     }, 750);
   });
+});
+
+test('resolvePrimaryWsEndpoint uses __APP_WS_URL__ as primary endpoint and supports global injection', () => {
+  const prev = (globalThis as Record<string, unknown>).__APP_WS_URL__;
+  try {
+    (globalThis as Record<string, unknown>).__APP_WS_URL__ = 'wss://tombola-prod.example.com/ws';
+    const resolved = resolvePrimaryWsEndpoint(undefined, {
+      windowProtocol: 'https:',
+      windowHost: 'user.github.io',
+      windowHostname: 'user.github.io',
+    });
+    assert.equal(resolved, 'wss://tombola-prod.example.com/ws');
+  } finally {
+    if (prev === undefined) {
+      delete (globalThis as Record<string, unknown>).__APP_WS_URL__;
+    } else {
+      (globalThis as Record<string, unknown>).__APP_WS_URL__ = prev;
+    }
+  }
+});
+
+test('initWebSocket catches missing WebSocket API in try-catch and falls back to BroadcastChannel', () => {
+  disconnectWebSocket(true);
+  const channels: MockBroadcastChannel[] = [];
+  class TrackedChannel extends MockBroadcastChannel {
+    constructor(name: string) {
+      super(name);
+      channels.push(this);
+    }
+  }
+
+  const state = initWebSocket({
+    definedAppWsUrlOverride: 'wss://tombola-prod.example.com/ws',
+    relativeWsUrlOverride: null,
+    WebSocketImpl: null,
+    BroadcastChannelImpl: TrackedChannel as unknown as typeof BroadcastChannel,
+  });
+
+  assert.equal(state.fallbackActive, true);
+  assert.equal(isBroadcastFallbackActive(), true);
+  sendRealtimeMessage({ type: 'REGIA_EXTRACT', number: 90 });
+  assert.equal(channels[0].postedMessages[0].number, 90);
+  disconnectWebSocket(true);
 });
