@@ -357,7 +357,11 @@ export function subscribeToJackpotBank(callback: (bank: JackpotBankData) => void
       }
     },
     (err) => {
-      console.warn('Jackpot bank realtime subscription error:', err);
+      try {
+        handleFirestoreError(err, OperationType.GET, `jackpot_bank/${BANK_DOC_ID}`);
+      } catch {
+        // Logged structured Firestore error cleanly
+      }
     }
   );
 }
@@ -541,6 +545,18 @@ export async function getUnclaimedHistory(limitCount: number = 8): Promise<Uncla
 // PROFILI DIFFICOLTÀ & SOGLIE REGIA (SALVATI SU FIRESTORE)
 // ============================================================================
 
+function sortRegiaProfiles(profiles: RegiaProfileData[]): RegiaProfileData[] {
+  const presetOrder = ['high', 'medium', 'normal', 'random'];
+  return [...profiles].sort((a, b) => {
+    const ia = presetOrder.indexOf(a.id);
+    const ib = presetOrder.indexOf(b.id);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1;
+    if (ib !== -1) return 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 export async function getRegiaProfiles(): Promise<{ profiles: RegiaProfileData[]; fromCloud: boolean }> {
   if (!db) await initFirebaseJackpot();
   if (!db) {
@@ -569,19 +585,9 @@ export async function getRegiaProfiles(): Promise<{ profiles: RegiaProfileData[]
       loaded.push(sanitizeRegiaProfile({ ...(docSnap.data() as Partial<RegiaProfileData>), id: docSnap.id }));
     });
 
-    // Sort presets first (in defined order), then custom profiles alphabetically
-    const presetOrder = ['high', 'medium', 'normal', 'random'];
-    loaded.sort((a, b) => {
-      const ia = presetOrder.indexOf(a.id);
-      const ib = presetOrder.indexOf(b.id);
-      if (ia !== -1 && ib !== -1) return ia - ib;
-      if (ia !== -1) return -1;
-      if (ib !== -1) return 1;
-      return a.name.localeCompare(b.name);
-    });
-
-    writeProfilesCache(loaded);
-    return { profiles: loaded, fromCloud: true };
+    const sorted = sortRegiaProfiles(loaded);
+    writeProfilesCache(sorted);
+    return { profiles: sorted, fromCloud: true };
   } catch (err) {
     console.warn('Failed to load regia profiles from Firestore:', err);
     try {
@@ -591,6 +597,61 @@ export async function getRegiaProfiles(): Promise<{ profiles: RegiaProfileData[]
     }
     return { profiles: readProfilesCache(), fromCloud: false };
   }
+}
+
+export function subscribeToRegiaProfiles(
+  callback: (profiles: RegiaProfileData[]) => void
+): (() => void) | null {
+  if (!db) return null;
+  const path = 'regia_profiles';
+  return onSnapshot(
+    collection(db, path),
+    (snap) => {
+      if (snap.empty) return;
+      const loaded: RegiaProfileData[] = [];
+      snap.forEach((docSnap) => {
+        loaded.push(sanitizeRegiaProfile({ ...(docSnap.data() as Partial<RegiaProfileData>), id: docSnap.id }));
+      });
+      const sorted = sortRegiaProfiles(loaded);
+      writeProfilesCache(sorted);
+      callback(sorted);
+    },
+    (err) => {
+      try {
+        handleFirestoreError(err, OperationType.LIST, path);
+      } catch {
+        // Structured error logged
+      }
+    }
+  );
+}
+
+export function subscribeToActiveRegiaProfile(
+  callback: (activeProfileId: string) => void
+): (() => void) | null {
+  if (!db) return null;
+  const path = 'regia_settings/active_profile';
+  return onSnapshot(
+    doc(db, 'regia_settings', 'active_profile'),
+    (snap) => {
+      if (snap.exists() && snap.data()?.activeProfileId) {
+        const id = String(snap.data().activeProfileId);
+        try {
+          localStorage.setItem(ACTIVE_PROFILE_LOCAL_KEY, id);
+        } catch {
+          // Ignore storage error
+        }
+        callback(id);
+      }
+    },
+    (err) => {
+      try {
+        handleFirestoreError(err, OperationType.GET, path);
+      } catch {
+        // Structured error logged
+      }
+    }
+  );
 }
 
 export async function getActiveRegiaProfileId(): Promise<string> {
@@ -719,4 +780,264 @@ export async function deleteRegiaProfile(
     }
     return { success: false, error: err?.message || 'Errore eliminazione profilo.' };
   }
+}
+
+// ============================================================================
+// CONFIGURAZIONE UNIFICATA PARTITA REGIA (DOCUMENTO UNICO: regia_config/main)
+// ============================================================================
+// Salva difficoltà, soglie e premi in un unico documento Firestore per evitare
+// duplicazioni e disallineamenti tra le varie .regia-card di configurazione.
+
+export interface RegiaGameConfigDoc {
+  id: string;
+  activeProfileId: string;
+  difficulty: {
+    enabled: boolean;
+    level: DifficultyLevel;
+    forcedMinAmbo: number;
+    forcedMinTerno: number;
+    forcedMinQuaterna: number;
+    forcedMinCinquina: number;
+    forcedMinTombola: number;
+  };
+  thresholds: {
+    delayMaxGold: number;
+    delayMaxAmbo: number;
+    delayMaxTerno: number;
+    delayMaxQuaterna: number;
+    delayMaxCinquina: number;
+    delayMaxTombola: number;
+  };
+  prizes: {
+    prizePool: number;
+    currency: string;
+  };
+  updatedAt: string;
+}
+
+const REGIA_CONFIG_DOC_ID = 'main';
+const REGIA_CONFIG_LOCAL_KEY = 'tombola_regia_unified_config_v1';
+
+export function buildDefaultRegiaGameConfig(): RegiaGameConfigDoc {
+  const base = DEFAULT_REGIA_PROFILES[0];
+  return {
+    id: REGIA_CONFIG_DOC_ID,
+    activeProfileId: base.id,
+    difficulty: {
+      enabled: base.enabled,
+      level: base.difficultyLevel,
+      forcedMinAmbo: base.forcedMinAmbo,
+      forcedMinTerno: base.forcedMinTerno,
+      forcedMinQuaterna: base.forcedMinQuaterna,
+      forcedMinCinquina: base.forcedMinCinquina,
+      forcedMinTombola: base.forcedMinTombola,
+    },
+    thresholds: {
+      delayMaxGold: base.delayMaxGold,
+      delayMaxAmbo: base.delayMaxAmbo,
+      delayMaxTerno: base.delayMaxTerno,
+      delayMaxQuaterna: base.delayMaxQuaterna,
+      delayMaxCinquina: base.delayMaxCinquina,
+      delayMaxTombola: base.delayMaxTombola,
+    },
+    prizes: {
+      prizePool: 0,
+      currency: '€',
+    },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function sanitizeRegiaGameConfig(
+  input: Partial<RegiaGameConfigDoc> | null | undefined
+): RegiaGameConfigDoc {
+  const defaults = buildDefaultRegiaGameConfig();
+  const allowedLevels: DifficultyLevel[] = ['high', 'medium', 'normal', 'random', 'custom'];
+  const rawLevel = input?.difficulty?.level;
+  const safeLevel: DifficultyLevel = allowedLevels.includes(rawLevel as DifficultyLevel)
+    ? (rawLevel as DifficultyLevel)
+    : defaults.difficulty.level;
+
+  const rawPool = Number(input?.prizes?.prizePool);
+  const safePool = Number.isFinite(rawPool)
+    ? Math.min(100000000, Math.max(0, Math.round(rawPool * 100) / 100))
+    : defaults.prizes.prizePool;
+
+  const rawCurrency = typeof input?.prizes?.currency === 'string' ? input.prizes.currency.trim() : '';
+  const safeCurrency = rawCurrency && rawCurrency.length <= 8 ? rawCurrency : defaults.prizes.currency;
+
+  return {
+    id: REGIA_CONFIG_DOC_ID,
+    activeProfileId: sanitizeProfileId(input?.activeProfileId || defaults.activeProfileId),
+    difficulty: {
+      enabled:
+        input?.difficulty?.enabled !== undefined
+          ? Boolean(input.difficulty.enabled)
+          : defaults.difficulty.enabled,
+      level: safeLevel,
+      forcedMinAmbo: clampThreshold(input?.difficulty?.forcedMinAmbo, 1, 90, defaults.difficulty.forcedMinAmbo),
+      forcedMinTerno: clampThreshold(input?.difficulty?.forcedMinTerno, 1, 90, defaults.difficulty.forcedMinTerno),
+      forcedMinQuaterna: clampThreshold(
+        input?.difficulty?.forcedMinQuaterna,
+        1,
+        90,
+        defaults.difficulty.forcedMinQuaterna
+      ),
+      forcedMinCinquina: clampThreshold(
+        input?.difficulty?.forcedMinCinquina,
+        1,
+        90,
+        defaults.difficulty.forcedMinCinquina
+      ),
+      forcedMinTombola: clampThreshold(
+        input?.difficulty?.forcedMinTombola,
+        1,
+        90,
+        defaults.difficulty.forcedMinTombola
+      ),
+    },
+    thresholds: {
+      delayMaxGold: clampThreshold(input?.thresholds?.delayMaxGold, 5, 90, defaults.thresholds.delayMaxGold),
+      delayMaxAmbo: clampThreshold(input?.thresholds?.delayMaxAmbo, 5, 90, defaults.thresholds.delayMaxAmbo),
+      delayMaxTerno: clampThreshold(input?.thresholds?.delayMaxTerno, 5, 90, defaults.thresholds.delayMaxTerno),
+      delayMaxQuaterna: clampThreshold(
+        input?.thresholds?.delayMaxQuaterna,
+        5,
+        90,
+        defaults.thresholds.delayMaxQuaterna
+      ),
+      delayMaxCinquina: clampThreshold(
+        input?.thresholds?.delayMaxCinquina,
+        5,
+        90,
+        defaults.thresholds.delayMaxCinquina
+      ),
+      delayMaxTombola: clampThreshold(input?.thresholds?.delayMaxTombola, 5, 90, defaults.thresholds.delayMaxTombola),
+    },
+    prizes: {
+      prizePool: safePool,
+      currency: safeCurrency,
+    },
+    updatedAt:
+      typeof input?.updatedAt === 'string' && input.updatedAt.length >= 10 && input.updatedAt.length <= 40
+        ? input.updatedAt
+        : new Date().toISOString(),
+  };
+}
+
+export function buildRegiaGameConfigSignature(config: RegiaGameConfigDoc): string {
+  return JSON.stringify({
+    activeProfileId: config.activeProfileId,
+    difficulty: config.difficulty,
+    thresholds: config.thresholds,
+    prizes: config.prizes,
+  });
+}
+
+function readGameConfigCache(): RegiaGameConfigDoc | null {
+  try {
+    const raw = localStorage.getItem(REGIA_CONFIG_LOCAL_KEY);
+    if (raw) {
+      return sanitizeRegiaGameConfig(JSON.parse(raw));
+    }
+  } catch {
+    // Ignore storage error
+  }
+  return null;
+}
+
+function writeGameConfigCache(cfg: RegiaGameConfigDoc) {
+  try {
+    localStorage.setItem(REGIA_CONFIG_LOCAL_KEY, JSON.stringify(cfg));
+  } catch {
+    // Ignore storage error
+  }
+}
+
+export async function getRegiaGameConfig(): Promise<{ config: RegiaGameConfigDoc | null; fromCloud: boolean }> {
+  if (!db) await initFirebaseJackpot();
+  if (!db) {
+    return { config: readGameConfigCache(), fromCloud: false };
+  }
+
+  const path = `regia_config/${REGIA_CONFIG_DOC_ID}`;
+  try {
+    const snap = await getDoc(doc(db, 'regia_config', REGIA_CONFIG_DOC_ID));
+    if (snap.exists()) {
+      const clean = sanitizeRegiaGameConfig(snap.data() as Partial<RegiaGameConfigDoc>);
+      writeGameConfigCache(clean);
+      return { config: clean, fromCloud: true };
+    }
+    return { config: null, fromCloud: true };
+  } catch (err) {
+    try {
+      handleFirestoreError(err, OperationType.GET, path);
+    } catch {
+      // Structured error logged
+    }
+    return { config: readGameConfigCache(), fromCloud: false };
+  }
+}
+
+export async function saveRegiaGameConfig(
+  input: Partial<RegiaGameConfigDoc>
+): Promise<{ success: boolean; config: RegiaGameConfigDoc; savedToCloud: boolean; error?: string }> {
+  const clean = sanitizeRegiaGameConfig({
+    ...input,
+    id: REGIA_CONFIG_DOC_ID,
+    updatedAt: new Date().toISOString(),
+  });
+  writeGameConfigCache(clean);
+
+  if (!db) await initFirebaseJackpot();
+  if (!db) {
+    return {
+      success: false,
+      config: clean,
+      savedToCloud: false,
+      error: 'Database Firestore non connesso: configurazione salvata in cache locale.',
+    };
+  }
+
+  const path = `regia_config/${REGIA_CONFIG_DOC_ID}`;
+  try {
+    await setDoc(doc(db, 'regia_config', REGIA_CONFIG_DOC_ID), clean);
+    return { success: true, config: clean, savedToCloud: true };
+  } catch (err: any) {
+    try {
+      handleFirestoreError(err, OperationType.WRITE, path);
+    } catch {
+      // Structured error logged
+    }
+    return {
+      success: false,
+      config: clean,
+      savedToCloud: false,
+      error: err?.message || 'Errore salvataggio configurazione unificata.',
+    };
+  }
+}
+
+export function subscribeToRegiaGameConfig(
+  callback: (config: RegiaGameConfigDoc) => void
+): (() => void) | null {
+  if (!db) return null;
+  const path = `regia_config/${REGIA_CONFIG_DOC_ID}`;
+  return onSnapshot(
+    doc(db, 'regia_config', REGIA_CONFIG_DOC_ID),
+    (snap) => {
+      if (snap.exists()) {
+        const clean = sanitizeRegiaGameConfig(snap.data() as Partial<RegiaGameConfigDoc>);
+        writeGameConfigCache(clean);
+        callback(clean);
+      }
+    },
+    (err) => {
+      try {
+        handleFirestoreError(err, OperationType.GET, path);
+      } catch {
+        // Structured error logged
+      }
+    }
+  );
 }

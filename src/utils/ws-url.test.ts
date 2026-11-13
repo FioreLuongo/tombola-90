@@ -69,3 +69,21 @@ test('resolveWebSocketUrl uses active window.location.host on Cloud Run / full-s
   });
   assert.equal(url, 'wss://ais-pre-example.run.app/ws');
 });
+
+test('resolveWebSocketUrl skips mismatched ais-pre VITE_WS_URL when running on ais-dev or localhost', () => {
+  const onAiStudioDev = resolveWebSocketUrl({
+    viteWsUrl: 'wss://ais-pre-other.europe-west2.run.app/ws',
+    windowHostname: 'ais-dev-current.europe-west2.run.app',
+    windowHost: 'ais-dev-current.europe-west2.run.app',
+    windowProtocol: 'https:'
+  });
+  assert.equal(onAiStudioDev, 'wss://ais-dev-current.europe-west2.run.app/ws');
+
+  const onLocal = resolveWebSocketUrl({
+    viteWsUrl: 'wss://ais-pre-other.europe-west2.run.app/ws',
+    windowHostname: 'localhost',
+    windowHost: 'localhost:3000',
+    windowProtocol: 'http:'
+  });
+  assert.equal(onLocal, 'ws://localhost:3000/ws');
+});

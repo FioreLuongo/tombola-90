@@ -53,6 +53,39 @@ service cloud.firestore {
              && data.updatedAt is string && data.updatedAt.size() >= 10 && data.updatedAt.size() <= 40;
     }
 
+    function isValidRegiaGameConfig(data) {
+      return data.keys().hasAll(['id', 'activeProfileId', 'difficulty', 'thresholds', 'prizes', 'updatedAt'])
+             && data.keys().hasOnly(['id', 'activeProfileId', 'difficulty', 'thresholds', 'prizes', 'updatedAt'])
+             && isValidId(data.id)
+             && isValidId(data.activeProfileId)
+             && data.updatedAt is string && data.updatedAt.size() >= 10 && data.updatedAt.size() <= 40
+             && data.difficulty is map
+             && data.difficulty.keys().hasAll(['enabled', 'level', 'forcedMinAmbo', 'forcedMinTerno', 'forcedMinQuaterna', 'forcedMinCinquina', 'forcedMinTombola'])
+             && data.difficulty.keys().hasOnly(['enabled', 'level', 'forcedMinAmbo', 'forcedMinTerno', 'forcedMinQuaterna', 'forcedMinCinquina', 'forcedMinTombola'])
+             && data.difficulty.enabled is bool
+             && data.difficulty.level in ['high', 'medium', 'normal', 'random', 'custom']
+             && isValidThreshold(data.difficulty.forcedMinAmbo, 1, 90)
+             && isValidThreshold(data.difficulty.forcedMinTerno, 1, 90)
+             && isValidThreshold(data.difficulty.forcedMinQuaterna, 1, 90)
+             && isValidThreshold(data.difficulty.forcedMinCinquina, 1, 90)
+             && isValidThreshold(data.difficulty.forcedMinTombola, 1, 90)
+             && data.thresholds is map
+             && data.thresholds.keys().hasAll(['delayMaxGold', 'delayMaxAmbo', 'delayMaxTerno', 'delayMaxQuaterna', 'delayMaxCinquina', 'delayMaxTombola'])
+             && data.thresholds.keys().hasOnly(['delayMaxGold', 'delayMaxAmbo', 'delayMaxTerno', 'delayMaxQuaterna', 'delayMaxCinquina', 'delayMaxTombola'])
+             && isValidThreshold(data.thresholds.delayMaxGold, 5, 90)
+             && isValidThreshold(data.thresholds.delayMaxAmbo, 5, 90)
+             && isValidThreshold(data.thresholds.delayMaxTerno, 5, 90)
+             && isValidThreshold(data.thresholds.delayMaxQuaterna, 5, 90)
+             && isValidThreshold(data.thresholds.delayMaxCinquina, 5, 90)
+             && isValidThreshold(data.thresholds.delayMaxTombola, 5, 90)
+             && data.prizes is map
+             && data.prizes.keys().hasAll(['prizePool', 'currency'])
+             && data.prizes.keys().hasOnly(['prizePool', 'currency'])
+             && (data.prizes.prizePool is int || data.prizes.prizePool is float)
+             && data.prizes.prizePool >= 0 && data.prizes.prizePool <= 100000000
+             && data.prizes.currency is string && data.prizes.currency.size() >= 1 && data.prizes.currency.size() <= 8;
+    }
+
     // Test connection document
     match /test/connection {
       allow read, write: if true;
@@ -91,6 +124,15 @@ service cloud.firestore {
     match /regia_settings/{settingId} {
       allow read: if isValidId(settingId);
       allow create, update: if isValidId(settingId) && isValidActiveRegiaSettings(request.resource.data);
+      allow delete: if false;
+    }
+
+    // Unified single-document Regia live game configuration (difficulty, thresholds, prizes)
+    match /regia_config/{configId} {
+      allow read: if isValidId(configId);
+      allow create, update: if isValidId(configId)
+                            && isValidRegiaGameConfig(request.resource.data)
+                            && request.resource.data.id == configId;
       allow delete: if false;
     }
   }

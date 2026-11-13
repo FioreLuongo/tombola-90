@@ -69,6 +69,12 @@ export function normalizeToWsUrl(rawUrl?: string | null): string | null {
   }
 }
 
+function isAiStudioHost(hostname?: string): boolean {
+  if (!hostname) return false;
+  const lower = hostname.toLowerCase();
+  return (lower.startsWith('ais-dev-') || lower.startsWith('ais-pre-')) && lower.endsWith('.run.app');
+}
+
 export function resolveWebSocketUrl(input: ResolveWsUrlInput): string | null {
   // 1. Explicit URL query override (?ws=... or ?wsUrl=...)
   if (input.search) {
@@ -82,11 +88,7 @@ export function resolveWebSocketUrl(input: ResolveWsUrlInput): string | null {
     }
   }
 
-  // 2. Explicit VITE_WS_URL environment variable
-  const normalizedViteWs = normalizeToWsUrl(input.viteWsUrl);
-  if (normalizedViteWs) return normalizedViteWs;
-
-  // 3. Saved runtime override from localStorage
+  // 2. Saved runtime override from localStorage
   const normalizedStored = normalizeToWsUrl(input.storedWsUrl);
   if (normalizedStored) return normalizedStored;
 
@@ -95,14 +97,17 @@ export function resolveWebSocketUrl(input: ResolveWsUrlInput): string | null {
   const protocol = input.windowProtocol || 'https:';
   const wsProto = protocol === 'https:' ? 'wss:' : 'ws:';
 
-  // 4. Local development server always connects to local host
+  // 3. Local development server always connects to local host unless ?ws= override is provided
   if (hostname === 'localhost' || hostname === '127.0.0.1') {
     return host ? `${wsProto}//${host}/ws` : null;
   }
 
-  // 5. Static-only hosting (e.g. GitHub Pages, Cloudflare Pages, Firebase Hosting):
-  //    route WebSocket to the configured backend hosting URL (VITE_APP_URL / APP_URL) if available.
+  // 4. Static-only hosting (e.g. GitHub Pages, Cloudflare Pages, Firebase Hosting):
+  //    route WebSocket to VITE_WS_URL or the configured backend hosting URL (VITE_APP_URL / APP_URL).
   if (isStaticOnlyHost(hostname)) {
+    const staticViteWs = normalizeToWsUrl(input.viteWsUrl);
+    if (staticViteWs) return staticViteWs;
+
     const backendFromViteApp = normalizeToWsUrl(input.viteAppUrl);
     if (backendFromViteApp && new URL(backendFromViteApp).hostname !== hostname) {
       return backendFromViteApp;
@@ -114,15 +119,24 @@ export function resolveWebSocketUrl(input: ResolveWsUrlInput): string | null {
     return null;
   }
 
-  // 6. Explicit VITE_APP_URL hosting configuration
-  const normalizedViteApp = normalizeToWsUrl(input.viteAppUrl);
-  if (normalizedViteApp) return normalizedViteApp;
+  // 5. Explicit VITE_WS_URL on non-static hosts (skip cross-host ais-pre/ais-dev URLs that 302-redirect)
+  const normalizedViteWs = normalizeToWsUrl(input.viteWsUrl);
+  if (normalizedViteWs) {
+    try {
+      const wsHostname = new URL(normalizedViteWs).hostname;
+      if (!hostname || wsHostname === hostname || !isAiStudioHost(wsHostname)) {
+        return normalizedViteWs;
+      }
+    } catch {
+      return normalizedViteWs;
+    }
+  }
 
-  // 7. Full-stack hosting (Cloud Run, Render Web Service, etc.): use active window.location.host
+  // 6. Full-stack hosting (Cloud Run, Render Web Service, etc.): use active window.location.host
   if (host) {
     return `${wsProto}//${host}/ws`;
   }
 
-  // 8. Standalone / fallback to configured APP_URL
-  return normalizeToWsUrl(input.configuredAppUrl);
+  // 7. Explicit VITE_APP_URL / configured APP_URL fallback outside browser
+  return normalizeToWsUrl(input.viteAppUrl) || normalizeToWsUrl(input.configuredAppUrl);
 }

@@ -1,6 +1,7 @@
 import {
   CUSTOM_WS_STORAGE_KEY,
   getAppBaseUrl,
+  getRelativeWebSocketUrl,
   getWebSocketUrl,
   resolveRuntimeAppConfig,
   type ResolvedAppConfig,
@@ -10,11 +11,16 @@ import type { ConnectionStatus, RealtimeMessage } from './realtime-sync';
 export const BROADCAST_CHANNEL_NAME = 'tombola90_realtime_channel';
 const MAX_RECONNECT_DELAY_MS = 8000;
 const HEARTBEAT_INTERVAL_MS = 3500;
+const DEFAULT_SILENT_STARTUP_RETRIES = 2;
+const INITIAL_RETRY_DELAY_MS = 600;
+const EXTERNAL_HANDSHAKE_TIMEOUT_MS = 2000;
 
 export interface WebSocketTransportState {
   status: ConnectionStatus;
   fallbackActive: boolean;
+  relativeFallbackActive: boolean;
   wsUrl: string | null;
+  relativeWsUrl: string | null;
   hostingUrl: string;
   clientCount: number;
   latencyMs: number;
@@ -23,9 +29,12 @@ export interface WebSocketTransportState {
 
 export interface InitWebSocketOptions {
   wsUrlOverride?: string | null;
+  relativeWsUrlOverride?: string | null;
+  silentStartupRetries?: number;
   role?: 'regia' | 'tv';
   onMessage?: (data: RealtimeMessage, origin: 'websocket' | 'broadcast_channel') => void;
   onStatusChange?: (status: ConnectionStatus, clientCount: number, fallbackActive: boolean) => void;
+  onRelativeFallbackActivated?: (relativeUrl: string, reason: string) => void;
   onFallbackActivated?: (reason: string, wsUrl: string | null) => void;
   onConnected?: (wsUrl: string) => void;
   onLatency?: (latencyMs: number) => void;
@@ -38,13 +47,20 @@ export interface InitWebSocketOptions {
 let ws: WebSocket | null = null;
 let broadcastChannel: BroadcastChannel | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let connectTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 let pingTimer: ReturnType<typeof setInterval> | null = null;
 let isConnecting = false;
 let reconnectAttempts = 0;
 
 /**
- * Flag esplicito di fallback: diventa true se la connessione WebSocket
- * non è configurata o fallisce, instradando i messaggi sul BroadcastChannel locale.
+ * Flag di fallback automatico su URL relativo (/ws -> host corrente)
+ * quando il server WebSocket esterno configurato non è raggiungibile.
+ */
+let useRelativeFallback = false;
+
+/**
+ * Flag esplicito di fallback su BroadcastChannel: diventa true se sia il
+ * WebSocket primario che l'eventuale URL relativo falliscono o non sono disponibili.
  */
 let useBroadcastFallback = false;
 
@@ -52,7 +68,9 @@ let activeOptions: InitWebSocketOptions = {};
 let transportState: WebSocketTransportState = {
   status: 'disconnected',
   fallbackActive: false,
+  relativeFallbackActive: false,
   wsUrl: null,
+  relativeWsUrl: null,
   hostingUrl: '',
   clientCount: 1,
   latencyMs: 0,
@@ -116,6 +134,13 @@ function stopHeartbeat() {
   }
 }
 
+function clearConnectTimeout() {
+  if (connectTimeoutTimer) {
+    clearTimeout(connectTimeoutTimer);
+    connectTimeoutTimer = null;
+  }
+}
+
 function startHeartbeat() {
   stopHeartbeat();
   const sendPing = () => {
@@ -133,20 +158,32 @@ function startHeartbeat() {
 
 function scheduleReconnect() {
   if (reconnectTimer) clearTimeout(reconnectTimer);
-  const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), MAX_RECONNECT_DELAY_MS);
+  const silentRetries = activeOptions.silentStartupRetries ?? DEFAULT_SILENT_STARTUP_RETRIES;
+  const delay =
+    reconnectAttempts < silentRetries
+      ? INITIAL_RETRY_DELAY_MS * (reconnectAttempts + 1)
+      : Math.min(1000 * Math.pow(1.5, Math.max(0, reconnectAttempts - silentRetries)), MAX_RECONNECT_DELAY_MS);
   reconnectAttempts++;
   reconnectTimer = setTimeout(() => {
+    useRelativeFallback = false;
+    transportState.relativeFallbackActive = false;
     connectInternal();
   }, delay);
 }
 
-function activateFallback(reason: string, wsUrl: string | null) {
+function enableBroadcastBackupSilently(reason: string) {
   useBroadcastFallback = true;
   transportState.fallbackActive = true;
   transportState.lastError = reason;
   ensureBroadcastChannel(activeOptions.BroadcastChannelImpl);
+}
+
+function activateBroadcastFallback(reason: string, wsUrl: string | null, notifyUi: boolean = true) {
+  enableBroadcastBackupSilently(reason);
   activeOptions.onRawLog?.(`[WebSocket] Fallback BroadcastChannel attivato: ${reason}`, 'warn');
-  activeOptions.onFallbackActivated?.(reason, wsUrl);
+  if (notifyUi) {
+    activeOptions.onFallbackActivated?.(reason, wsUrl);
+  }
 }
 
 function sendViaWebSocketOnly(msg: RealtimeMessage) {
@@ -159,20 +196,32 @@ function sendViaWebSocketOnly(msg: RealtimeMessage) {
   }
 }
 
-function connectInternal() {
-  const targetUrl =
+function resolveConnectionUrls(): { primaryUrl: string | null; relativeUrl: string | null } {
+  const primaryUrl =
     activeOptions.wsUrlOverride !== undefined ? activeOptions.wsUrlOverride : getWebSocketUrl();
+  const relativeUrl =
+    activeOptions.relativeWsUrlOverride !== undefined
+      ? activeOptions.relativeWsUrlOverride
+      : getRelativeWebSocketUrl();
+  return { primaryUrl, relativeUrl };
+}
+
+function connectInternal() {
+  const { primaryUrl, relativeUrl } = resolveConnectionUrls();
   const hostingUrl = getAppBaseUrl();
+  const targetUrl = useRelativeFallback ? relativeUrl : primaryUrl;
 
   transportState.wsUrl = targetUrl;
+  transportState.relativeWsUrl = relativeUrl;
+  transportState.relativeFallbackActive = useRelativeFallback;
   transportState.hostingUrl = hostingUrl;
 
   ensureBroadcastChannel(activeOptions.BroadcastChannelImpl);
 
   if (!targetUrl) {
     transportState.status = 'disconnected';
-    activateFallback(
-      'Nessun endpoint WebSocket remoto configurato per questo host: attivo sync locale via BroadcastChannel.',
+    activateBroadcastFallback(
+      'Nessun endpoint WebSocket configurato per questo host: attivo sync locale via BroadcastChannel.',
       null
     );
     activeOptions.onStatusChange?.('disconnected', transportState.clientCount, true);
@@ -188,15 +237,48 @@ function connectInternal() {
 
   if (!WebSocketCtor) {
     transportState.status = 'error';
-    activateFallback('API WebSocket non disponibile in questo ambiente.', targetUrl);
+    activateBroadcastFallback('API WebSocket non disponibile in questo ambiente.', targetUrl);
     activeOptions.onStatusChange?.('error', transportState.clientCount, true);
     return;
   }
 
+  const canFallbackToRelative = (failedUrl: string | null): boolean =>
+    !useRelativeFallback && Boolean(relativeUrl) && relativeUrl !== failedUrl;
+
+  const tryRelativeFallback = (reason: string, failedUrl: string | null): boolean => {
+    if (!canFallbackToRelative(failedUrl) || !relativeUrl) return false;
+    useRelativeFallback = true;
+    transportState.relativeFallbackActive = true;
+    transportState.lastError = reason;
+    if (ws) {
+      try {
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        ws.close();
+      } catch {
+        // Ignore cleanup close error
+      }
+      ws = null;
+    }
+    isConnecting = false;
+    activeOptions.onRawLog?.(
+      `[WebSocket] Server esterno (${failedUrl}) irraggiungibile: fallback automatico su URL relativo (${relativeUrl}).`,
+      'warn'
+    );
+    activeOptions.onRelativeFallbackActivated?.(relativeUrl, reason);
+    connectInternal();
+    return true;
+  };
+
   isConnecting = true;
   transportState.status = 'connecting';
   activeOptions.onStatusChange?.('connecting', transportState.clientCount, useBroadcastFallback);
-  activeOptions.onRawLog?.(`[WebSocket] Tentativo connessione a ${targetUrl}...`, 'info');
+  activeOptions.onRawLog?.(
+    `[WebSocket] Tentativo connessione${useRelativeFallback ? ' (fallback relativo)' : ''} a ${targetUrl}...`,
+    'info'
+  );
 
   try {
     const socket = new WebSocketCtor(targetUrl);
@@ -204,17 +286,36 @@ function connectInternal() {
     let openedOnce = false;
     ws = socket;
 
+    if (canFallbackToRelative(targetUrl)) {
+      clearConnectTimeout();
+      connectTimeoutTimer = setTimeout(() => {
+        if (ws === socket && !openedOnce && !failureReported) {
+          failureReported = true;
+          tryRelativeFallback(
+            `Timeout handshake WebSocket esterno (${targetUrl}).`,
+            targetUrl
+          );
+        }
+      }, EXTERNAL_HANDSHAKE_TIMEOUT_MS);
+    }
+
     socket.onopen = () => {
       if (ws !== socket) return;
+      clearConnectTimeout();
       isConnecting = false;
       openedOnce = true;
       reconnectAttempts = 0;
       useBroadcastFallback = false;
       transportState.fallbackActive = false;
+      transportState.relativeFallbackActive = useRelativeFallback;
       transportState.lastError = null;
       transportState.status = 'connected';
+      transportState.wsUrl = targetUrl;
 
-      activeOptions.onRawLog?.(`⚡ [WebSocket] Connesso a ${targetUrl} (fallback disattivato).`, 'info');
+      activeOptions.onRawLog?.(
+        `⚡ [WebSocket] Connesso a ${targetUrl}${useRelativeFallback ? ' (via fallback URL relativo)' : ''} (BroadcastChannel disattivato).`,
+        'info'
+      );
       activeOptions.onConnected?.(targetUrl);
       activeOptions.onStatusChange?.('connected', transportState.clientCount, false);
 
@@ -244,42 +345,65 @@ function connectInternal() {
       stopHeartbeat();
       transportState.status = 'disconnected';
 
+      const silentRetries = activeOptions.silentStartupRetries ?? DEFAULT_SILENT_STARTUP_RETRIES;
+      const shouldDelayUiAlert = reconnectAttempts < silentRetries;
+
       if (!openedOnce && !failureReported) {
         failureReported = true;
-        activateFallback(
-          `Connessione WebSocket rifiutata o chiusa da ${targetUrl}. Attivo fallback locale BroadcastChannel.`,
-          targetUrl
+        const reason = `Connessione WebSocket rifiutata o chiusa da ${targetUrl}.`;
+        if (tryRelativeFallback(reason, targetUrl)) {
+          return;
+        }
+        activateBroadcastFallback(
+          `${reason} Attivo fallback locale BroadcastChannel.`,
+          targetUrl,
+          !shouldDelayUiAlert
         );
       } else {
-        // Anche in caso di disconnessione successiva riabilitiamo temporaneamente il fallback locale
         useBroadcastFallback = true;
         transportState.fallbackActive = true;
       }
 
-      activeOptions.onStatusChange?.('disconnected', transportState.clientCount, useBroadcastFallback);
+      activeOptions.onStatusChange?.(
+        shouldDelayUiAlert ? 'connecting' : 'disconnected',
+        transportState.clientCount,
+        useBroadcastFallback
+      );
       scheduleReconnect();
     };
 
     socket.onerror = () => {
       if (ws !== socket) return;
       isConnecting = false;
-      transportState.status = 'error';
+      const silentRetries = activeOptions.silentStartupRetries ?? DEFAULT_SILENT_STARTUP_RETRIES;
+      const shouldDelayUiAlert = reconnectAttempts < silentRetries;
+      transportState.status = shouldDelayUiAlert ? 'connecting' : 'error';
       if (!failureReported) {
         failureReported = true;
-        activateFallback(
-          `Server WebSocket non raggiungibile su ${targetUrl}. Attivo fallback locale BroadcastChannel.`,
-          targetUrl
+        const reason = `Server WebSocket non raggiungibile su ${targetUrl}.`;
+        if (tryRelativeFallback(reason, targetUrl)) {
+          return;
+        }
+        activateBroadcastFallback(
+          `${reason} Attivo fallback locale BroadcastChannel.`,
+          targetUrl,
+          !shouldDelayUiAlert
         );
       }
-      activeOptions.onStatusChange?.('error', transportState.clientCount, true);
+      activeOptions.onStatusChange?.(
+        shouldDelayUiAlert ? 'connecting' : 'error',
+        transportState.clientCount,
+        true
+      );
     };
   } catch (err) {
     isConnecting = false;
+    const reason = `Impossibile aprire WebSocket verso ${targetUrl} (${String(err)}).`;
+    if (tryRelativeFallback(reason, targetUrl)) {
+      return;
+    }
     transportState.status = 'error';
-    activateFallback(
-      `Impossibile aprire WebSocket verso ${targetUrl} (${String(err)}). Attivo fallback locale BroadcastChannel.`,
-      targetUrl
-    );
+    activateBroadcastFallback(`${reason} Attivo fallback locale BroadcastChannel.`, targetUrl);
     activeOptions.onStatusChange?.('error', transportState.clientCount, true);
     scheduleReconnect();
   }
@@ -287,10 +411,14 @@ function connectInternal() {
 
 /**
  * Inizializza la connessione WebSocket usando gli URL risolti da src/config.ts.
- * In caso di errore o server non configurato/irraggiungibile, attiva automaticamente
- * il flag useBroadcastFallback = true per comunicare tra Regia e TV via BroadcastChannel.
+ * Se il server WebSocket esterno configurato è irraggiungibile, effettua prima
+ * un fallback automatico sull'URL relativo (/ws sull'host corrente); in caso
+ * di ulteriore errore attiva useBroadcastFallback = true per BroadcastChannel.
  */
 export function initWebSocket(options: InitWebSocketOptions = {}): WebSocketTransportState {
+  reconnectAttempts = 0;
+  useRelativeFallback = false;
+  useBroadcastFallback = false;
   activeOptions = { ...activeOptions, ...options };
   connectInternal();
   return getTransportState();
@@ -298,12 +426,15 @@ export function initWebSocket(options: InitWebSocketOptions = {}): WebSocketTran
 
 export function disconnectWebSocket(closeBroadcastChannel: boolean = false) {
   stopHeartbeat();
+  clearConnectTimeout();
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
   if (ws) {
     try {
+      ws.onopen = null;
+      ws.onmessage = null;
       ws.onclose = null;
       ws.onerror = null;
       ws.close();
@@ -321,6 +452,8 @@ export function disconnectWebSocket(closeBroadcastChannel: boolean = false) {
     broadcastChannel = null;
   }
   isConnecting = false;
+  useRelativeFallback = false;
+  transportState.relativeFallbackActive = false;
   transportState.status = 'disconnected';
 }
 
@@ -332,12 +465,10 @@ export function reconnectWebSocket(): WebSocketTransportState {
 }
 
 export function sendRealtimeMessage(msg: RealtimeMessage) {
-  // 1. Invia tramite WebSocket se attivo e fallback non forzato
   if (!useBroadcastFallback && ws && ws.readyState === 1 /* OPEN */) {
     sendViaWebSocketOnly(msg);
   }
 
-  // 2. BroadcastChannel sempre attivo in modalità fallback (e per zero-latency multi-tab)
   const channel = ensureBroadcastChannel(activeOptions.BroadcastChannelImpl);
   if (channel) {
     try {
@@ -367,8 +498,16 @@ export function isBroadcastFallbackActive(): boolean {
   return useBroadcastFallback;
 }
 
+export function isRelativeFallbackActive(): boolean {
+  return useRelativeFallback;
+}
+
 export function getTransportState(): WebSocketTransportState {
-  return { ...transportState, fallbackActive: useBroadcastFallback };
+  return {
+    ...transportState,
+    fallbackActive: useBroadcastFallback,
+    relativeFallbackActive: useRelativeFallback,
+  };
 }
 
 export function getRuntimeConfigSnapshot(): ResolvedAppConfig {

@@ -1,6 +1,10 @@
 import * as jackpotServiceModule from './firebase-jackpot-service';
+import { regiaStateManager } from './regia-state-manager';
 if (typeof window !== 'undefined' && !window.JackpotService) {
     window.JackpotService = jackpotServiceModule;
+}
+if (typeof window !== 'undefined' && !window.RegiaState) {
+    window.RegiaState = regiaStateManager;
 }
 
 function startTombolaApp() {
@@ -60,6 +64,46 @@ function startTombolaApp() {
         blockedNumbersCount: 0,
         difficultyIndex: 88
     };
+
+    // Sincronizza configurazione motore quando Firestore o Profili Regia cambiano nello state manager centralizzato
+    regiaStateManager.onEngineConfigSync((engine) => {
+        antiWinDifficultyConfig.enabled = engine.enabled;
+        antiWinDifficultyConfig.level = engine.level;
+        antiWinDifficultyConfig.forcedMin.ambo = engine.forcedMin.ambo;
+        antiWinDifficultyConfig.forcedMin.terno = engine.forcedMin.terno;
+        antiWinDifficultyConfig.forcedMin.quaterna = engine.forcedMin.quaterna;
+        antiWinDifficultyConfig.forcedMin.cinquina = engine.forcedMin.cinquina;
+        antiWinDifficultyConfig.forcedMin.tombola = engine.forcedMin.tombola;
+        antiWinDifficultyConfig.difficultyIndex = engine.difficultyIndex;
+
+        ['gold', 'ambo', 'terno', 'quaterna', 'cinquina', 'tombola'].forEach((k) => {
+            if (prizeDelaysConfig[k] && engine.delays[k]) {
+                prizeDelaysConfig[k].max = engine.delays[k].max;
+            }
+        });
+    });
+
+    // Sincronizza Montepremi e Valuta dal documento unico Firestore (regia_config/main)
+    regiaStateManager.onPrizesConfigSync((prizes) => {
+        const poolInput = document.getElementById('prizePool');
+        const currSelect = document.getElementById('currencySelect');
+        const nextPool = Number(prizes.prizePool) || 0;
+        const nextCurr = prizes.currency || '€';
+        let changed = false;
+
+        if (poolInput && (parseFloat(poolInput.value || '0') || 0) !== nextPool) {
+            poolInput.value = String(nextPool);
+            changed = true;
+        }
+        if (currSelect && currSelect.value !== nextCurr) {
+            currSelect.value = nextCurr;
+            changed = true;
+        }
+        if (changed) {
+            updatePrizes();
+            syncRegiaUI();
+        }
+    });
 
     // ===== CONFIGURAZIONE GESTIONE VINCITE (AUTO-RIPRESA & LIVE) =====
     let winHandlingMode = localStorage.getItem('tombola_win_handling_mode') || 'autoresume_5';
@@ -375,8 +419,11 @@ function startTombolaApp() {
 
     // ===== FUNZIONI PER IL NUOVO BOX MONTEPREMI NON VINTI =====
     function updateUnclaimedPotDisplay() {
-        const currency = document.getElementById('currencySelect').value;
-        document.getElementById('unclaimedPotDisplay').textContent = `${currency} ${unclaimedGoldTotal.toFixed(2)}`;
+        const currency = document.getElementById('currencySelect')?.value || '€';
+        regiaStateManager.syncPrizesState({
+            unclaimedCurrentGame: unclaimedGoldTotal,
+            currency,
+        });
     }
 
     // ===== FUNZIONI PER IL NUMERO GOLD =====
@@ -1905,11 +1952,11 @@ function startTombolaApp() {
         goldWinningCartella = null;
 
         const autoSaveToggle = document.getElementById('regiaAutoSaveCloudToggle');
-        if (autoSaveToggle && autoSaveToggle.checked && unclaimedGoldTotal > 0 && window.JackpotService) {
+        if (autoSaveToggle && autoSaveToggle.checked && unclaimedGoldTotal > 0) {
             const amountToSave = unclaimedGoldTotal;
-            const currency = document.getElementById('currencySelect').value || '€';
-            const gameId = document.getElementById('gameId').value || 'TOM001';
-            window.JackpotService.saveUnclaimedToDatabase(
+            const currency = document.getElementById('currencySelect')?.value || '€';
+            const gameId = document.getElementById('gameId')?.value || 'TOM001';
+            regiaStateManager.depositUnclaimedToFirestore(
                 amountToSave,
                 currency,
                 'all',
@@ -1918,7 +1965,6 @@ function startTombolaApp() {
             ).then(res => {
                 if (res.success) {
                     logRegiaEvent(`💾 Auto-salvati ${currency} ${amountToSave.toFixed(2)} nel Database Cloud (Partita ${gameId}).`, 'success');
-                    if (typeof refreshCloudHistoryUI === 'function') refreshCloudHistoryUI();
                 }
             }).catch(e => console.warn('Auto-save error:', e));
         }
@@ -3196,234 +3242,79 @@ function startTombolaApp() {
     }
 
     function logRegiaEvent(text, type = 'info') {
-        const logContent = document.getElementById('regiaLogContent');
-        if (!logContent) return;
-        const entry = document.createElement('div');
-        entry.className = `log-entry ${type}`;
-        const timeStr = new Date().toLocaleTimeString('it-IT');
-        entry.innerHTML = `<span class="log-time">[${timeStr}]</span> ${text}`;
-        logContent.appendChild(entry);
-        logContent.scrollTop = logContent.scrollHeight;
+        regiaStateManager.addLog(text, type);
     }
 
     function syncRegiaUI() {
-        // Estrazione
-        const curNumEl = document.getElementById('regiaCurrentNumber');
-        const curSmorfiaEl = document.getElementById('regiaSmorfiaText');
-        const extStatEl = document.getElementById('regiaExtractedStat');
-        const cdEl = document.getElementById('regiaCountdownDisplay');
-
-        if (curNumEl) {
-            curNumEl.textContent = extractedNumbers.length > 0 ? extractedNumbers[extractedNumbers.length - 1] : '--';
-        }
-        if (curSmorfiaEl) {
-            if (extractedNumbers.length > 0) {
-                const lastNum = extractedNumbers[extractedNumbers.length - 1];
-                const itMeaning = smorfiaItaliana[lastNum] || smorfiaNapolitana[lastNum] || '';
-                curSmorfiaEl.textContent = itMeaning ? `#${lastNum} - ${itMeaning}` : `#${lastNum}`;
-            } else {
-                curSmorfiaEl.textContent = "In attesa dell'inizio partita";
-            }
-        }
-        if (extStatEl) {
-            extStatEl.textContent = `${extractedNumbers.length} / 90 Estratti`;
-        }
-        if (cdEl) {
-            cdEl.textContent = `${remainingTime}s`;
+        const lastNum = extractedNumbers.length > 0 ? extractedNumbers[extractedNumbers.length - 1] : null;
+        let smorfiaText = "In attesa dell'inizio partita";
+        if (lastNum !== null) {
+            const itMeaning = smorfiaItaliana[lastNum] || smorfiaNapolitana[lastNum] || '';
+            smorfiaText = itMeaning ? `#${lastNum} - ${itMeaning}` : `#${lastNum}`;
         }
 
-        // Pulsanti comandi
-        const startBtn = document.getElementById('regiaStartBtn');
-        const pauseBtn = document.getElementById('regiaPauseBtn');
-        const extractBtn = document.getElementById('regiaExtractBtn');
-        if (startBtn) startBtn.disabled = isRunning || extractedNumbers.length >= 90;
-        if (pauseBtn) pauseBtn.disabled = !isRunning;
-        if (extractBtn) extractBtn.disabled = isRunning || extractedNumbers.length >= 90;
-
-        // Chip tempo
-        document.querySelectorAll('.regia-time-chips .regia-time-chip').forEach(chip => {
-            const t = parseInt(chip.dataset.time);
-            chip.classList.toggle('active', t === currentTimer);
+        regiaStateManager.syncExtractionState({
+            currentNumber: lastNum,
+            extractedNumbers: [...extractedNumbers],
+            remainingCount: Math.max(0, 90 - extractedNumbers.length),
+            smorfiaText,
+            isRunning,
+            timerSeconds: currentTimer,
+            remainingSeconds: remainingTime,
+            winHandlingMode,
+            voiceEnabled,
+            aiEnabled: aiIntelligenceEnabled,
         });
 
-        // Voce e AI
-        const vState = document.getElementById('regiaVoiceState');
-        const vBtn = document.getElementById('regiaVoiceBtn');
-        if (vState) vState.textContent = voiceEnabled ? 'ON' : 'OFF';
-        if (vBtn) vBtn.classList.toggle('active', voiceEnabled);
+        const prizePool = parseFloat(document.getElementById('prizePool')?.value || '0') || 0;
+        const currency = document.getElementById('currencySelect')?.value || '€';
+        regiaStateManager.syncPrizesState({
+            prizePool,
+            currency,
+            unclaimedCurrentGame: unclaimedGoldTotal,
+        });
 
-        const aiState = document.getElementById('regiaAiState');
-        const aiBtn = document.getElementById('regiaAiBtn');
-        if (aiState) aiState.textContent = aiIntelligenceEnabled ? 'ON' : 'OFF';
-        if (aiBtn) aiBtn.classList.toggle('active', aiIntelligenceEnabled);
-
-        // Montepremi
-        const poolInput = document.getElementById('regiaPrizePoolInput');
-        const currSelect = document.getElementById('regiaCurrencySelect');
-        const prizePool = parseFloat(document.getElementById('prizePool').value) || 0;
-        const currency = document.getElementById('currencySelect').value;
-
-        if (poolInput && document.activeElement !== poolInput) poolInput.value = prizePool;
-        if (currSelect) currSelect.value = currency;
-
-        const updatePrize = (id, pct) => {
-            const el = document.getElementById(id);
-            if (el) el.textContent = prizePool > 0 ? `${currency}${(prizePool * pct).toFixed(2)}` : '--';
-        };
-        updatePrize('regiaGoldPrize', 0.05);
-        updatePrize('regiaAmboPrize', 0.05);
-        updatePrize('regiaTernoPrize', 0.10);
-        updatePrize('regiaQuaternaPrize', 0.15);
-        updatePrize('regiaCinquinaPrize', 0.20);
-        updatePrize('regiaTombolaPrize', 0.45);
-
-        const unclaimedEl = document.getElementById('regiaUnclaimedVal');
-        if (unclaimedEl) unclaimedEl.textContent = `${currency} ${unclaimedGoldTotal.toFixed(2)}`;
-
-        // Colori
-        let totalActiveColors = 0;
-        const updateColorCount = (color, countId, toggleId) => {
+        const buildColorSlice = (color) => {
             const sheets = activeColorSheets[color] || [];
             const count = sheets.reduce((sum, s) => sum + s.count, 0);
-            const isActive = sheets.length > 0 ? sheets.some(s => s.active) : false;
-            if (isActive) totalActiveColors++;
-            const countEl = document.getElementById(countId);
-            const toggleEl = document.getElementById(toggleId);
-            if (countEl) countEl.textContent = `${count} cartelle (${isActive ? 'ATTIVO' : 'DISATTIVO'})`;
-            if (toggleEl) toggleEl.checked = isActive;
+            const active = sheets.length > 0 ? sheets.some(s => s.active) : false;
+            return { count, active };
         };
-        updateColorCount('blue', 'regiaBlueCount', 'regiaToggleBlue');
-        updateColorCount('orange', 'regiaOrangeCount', 'regiaToggleOrange');
-        updateColorCount('green', 'regiaGreenCount', 'regiaToggleGreen');
-        updateColorCount('yellow', 'regiaYellowCount', 'regiaToggleYellow');
-
-        const colorsBadge = document.getElementById('regiaActiveColorsBadge');
-        if (colorsBadge) {
-            if (totalActiveColors === 0) {
-                colorsBadge.textContent = "0 Colori (Tutti Inattivi)";
-                colorsBadge.style.color = "#f87171";
-                colorsBadge.style.background = "rgba(239, 68, 68, 0.15)";
-            } else {
-                colorsBadge.textContent = `${totalActiveColors} Colori Attivi`;
-                colorsBadge.style.color = "#4ade80";
-                colorsBadge.style.background = "rgba(16, 185, 129, 0.15)";
-            }
-        }
-
-        // Vincite Live
-        const winsContent = document.getElementById('regiaWinsContent');
-        const winsBadge = document.getElementById('regiaTotalWinsBadge');
-        if (winsContent) {
-            const winKeys = ['gold', 'ambo', 'terno', 'quaterna', 'cinquina', 'tombola'];
-            let activeWinsList = [];
-            winKeys.forEach(k => {
-                const w = cartelleWins[k];
-                if (w && w.won && w.cartellaId) {
-                    activeWinsList.push({ type: k.toUpperCase(), cartellaId: w.cartellaId, winCount: w.winCount });
-                }
-            });
-            if (winsBadge) winsBadge.textContent = `${activeWinsList.length} Vincite`;
-
-            if (activeWinsList.length === 0) {
-                winsContent.innerHTML = '<div class="regia-empty-state">In attesa delle prime vincite...</div>';
-            } else {
-                winsContent.innerHTML = activeWinsList.map(item => `
-                    <div class="regia-win-entry">
-                        <span><b>${item.type}</b>: ${item.cartellaId}</span>
-                        <span>Assegnato</span>
-                    </div>
-                `).join('');
-            }
-        }
-
-        // Box A: Scadenza Premi & Montepremi Non Vinti
-        const extCount = extractedNumbers.length;
-        const prizeDelayKeys = ['gold', 'ambo', 'terno', 'quaterna', 'cinquina', 'tombola'];
-        prizeDelayKeys.forEach(k => {
-            const conf = prizeDelaysConfig[k];
-            if (!conf) return;
-            const capKey = k.charAt(0).toUpperCase() + k.slice(1);
-            const inp = document.getElementById(`delayInput${capKey}`);
-            const prog = document.getElementById(`delayProgress${capKey}`);
-            const stat = document.getElementById(`delayStatus${capKey}`);
-
-            if (inp && document.activeElement !== inp) inp.value = conf.max;
-            if (prog) prog.textContent = `${extCount} / ${conf.max}`;
-            if (stat) {
-                const isWon = k === 'gold' ? goldWon : (cartelleWins[k] && cartelleWins[k].won);
-                if (isWon) {
-                    stat.className = 'delay-status-badge won';
-                    stat.textContent = 'VINTO';
-                } else if (conf.expired) {
-                    stat.className = 'delay-status-badge expired';
-                    stat.textContent = 'SCADUTO ➜ Cassa';
-                } else {
-                    stat.className = 'delay-status-badge';
-                    stat.textContent = `Entro ${conf.max}`;
-                }
-            }
+        regiaStateManager.syncColorsState({
+            blue: buildColorSlice('blue'),
+            orange: buildColorSlice('orange'),
+            green: buildColorSlice('green'),
+            yellow: buildColorSlice('yellow'),
         });
 
-        // Box Unificato: Algoritmo Difficoltà Vincite & Profili DB
-        const masterToggle = document.getElementById('regiaDifficultyMasterToggle');
-        const levelSelect = document.getElementById('regiaDifficultyLevelSelect');
-        const minAmboInp = document.getElementById('forcedMinAmbo');
-        const minTernoInp = document.getElementById('forcedMinTerno');
-        const minQuaternaInp = document.getElementById('forcedMinQuaterna');
-        const minCinquinaInp = document.getElementById('forcedMinCinquina');
-        const minTombolaInp = document.getElementById('forcedMinTombola');
-        const profileSelectEl = document.getElementById('regiaProfileSelect');
-        const deleteProfileBtn = document.getElementById('regiaDeleteProfileBtn');
-
-        if (masterToggle) masterToggle.checked = antiWinDifficultyConfig.enabled;
-        if (levelSelect && document.activeElement !== levelSelect) levelSelect.value = antiWinDifficultyConfig.level;
-        if (minAmboInp && document.activeElement !== minAmboInp) minAmboInp.value = antiWinDifficultyConfig.forcedMin.ambo;
-        if (minTernoInp && document.activeElement !== minTernoInp) minTernoInp.value = antiWinDifficultyConfig.forcedMin.terno;
-        if (minQuaternaInp && document.activeElement !== minQuaternaInp) minQuaternaInp.value = antiWinDifficultyConfig.forcedMin.quaterna;
-        if (minCinquinaInp && document.activeElement !== minCinquinaInp) minCinquinaInp.value = antiWinDifficultyConfig.forcedMin.cinquina;
-        if (minTombolaInp && document.activeElement !== minTombolaInp) minTombolaInp.value = antiWinDifficultyConfig.forcedMin.tombola;
-        if (profileSelectEl && document.activeElement !== profileSelectEl && activeRegiaProfileId) {
-            profileSelectEl.value = activeRegiaProfileId;
-        }
-        if (deleteProfileBtn) {
-            const currentProf = regiaProfilesCache.find(p => p.id === activeRegiaProfileId);
-            const isPreset = currentProf ? Boolean(currentProf.isPreset) : ['high', 'medium', 'normal', 'random'].includes(activeRegiaProfileId);
-            deleteProfileBtn.disabled = isPreset;
-            deleteProfileBtn.title = isPreset
-                ? 'I profili predefiniti non possono essere eliminati (puoi modificarli e salvarli come nuovo profilo)'
-                : 'Elimina il profilo personalizzato dal database Firestore';
-        }
-
-        // Aggiorna indice difficoltà stimato quando non ci sono ancora estrazioni attive
-        if (extractedNumbers.length === 0) {
-            if (!antiWinDifficultyConfig.enabled || antiWinDifficultyConfig.level === 'random') {
-                antiWinDifficultyConfig.difficultyIndex = 0;
-            } else {
-                const fm = antiWinDifficultyConfig.forcedMin;
-                const avgRatio = ((fm.ambo / 20) + (fm.terno / 35) + (fm.quaterna / 50) + (fm.cinquina / 65) + (fm.tombola / 85)) / 5;
-                antiWinDifficultyConfig.difficultyIndex = Math.min(98, Math.max(25, Math.round(avgRatio * 88)));
+        const winKeys = ['gold', 'ambo', 'terno', 'quaterna', 'cinquina', 'tombola'];
+        const activeWinsList = [];
+        winKeys.forEach(k => {
+            const w = cartelleWins[k];
+            if (w && w.won && w.cartellaId) {
+                activeWinsList.push({ type: k.toUpperCase(), cartellaId: w.cartellaId, winCount: w.winCount });
             }
-        }
-
-        const monitoredEl = document.getElementById('regiaMonitoredCards');
-        const blockedEl = document.getElementById('regiaBlockedNumbersCount');
-        const diffIdxEl = document.getElementById('regiaDifficultyIndex');
-        const diffBadge = document.getElementById('regiaDifficultyBadge');
+        });
+        regiaStateManager.syncWinsState(activeWinsList);
 
         const activeCardsCount = generatedCartelle.filter(c => isCartellaActive(c.id)).length;
-        if (monitoredEl) monitoredEl.textContent = `${activeCardsCount} cartelle (${activeCardsCount * 15} numeri)`;
-        if (blockedEl) blockedEl.textContent = `${antiWinDifficultyConfig.blockedNumbersCount} numeri`;
-        if (diffIdxEl) diffIdxEl.textContent = `${antiWinDifficultyConfig.difficultyIndex}% (${antiWinDifficultyConfig.level.toUpperCase()})`;
-        if (diffBadge) {
-            diffBadge.textContent = antiWinDifficultyConfig.enabled ? antiWinDifficultyConfig.level.toUpperCase() : 'DISATTIVO';
-            diffBadge.style.color = antiWinDifficultyConfig.enabled ? '#facc15' : '#94a3b8';
-        }
-
-        // Win Handling Mode
-        const winModeSel = document.getElementById('regiaWinModeSelect');
-        if (winModeSel && document.activeElement !== winModeSel) {
-            winModeSel.value = winHandlingMode;
-        }
+        antiWinDifficultyConfig.monitoredCardsCount = activeCardsCount;
+        regiaStateManager.syncEngineState({
+            enabled: antiWinDifficultyConfig.enabled,
+            level: antiWinDifficultyConfig.level,
+            forcedMin: { ...antiWinDifficultyConfig.forcedMin },
+            delays: {
+                gold: { max: prizeDelaysConfig.gold.max, expired: prizeDelaysConfig.gold.expired },
+                ambo: { max: prizeDelaysConfig.ambo.max, expired: prizeDelaysConfig.ambo.expired },
+                terno: { max: prizeDelaysConfig.terno.max, expired: prizeDelaysConfig.terno.expired },
+                quaterna: { max: prizeDelaysConfig.quaterna.max, expired: prizeDelaysConfig.quaterna.expired },
+                cinquina: { max: prizeDelaysConfig.cinquina.max, expired: prizeDelaysConfig.cinquina.expired },
+                tombola: { max: prizeDelaysConfig.tombola.max, expired: prizeDelaysConfig.tombola.expired },
+            },
+            monitoredCardsCount: activeCardsCount,
+            blockedNumbersCount: antiWinDifficultyConfig.blockedNumbersCount,
+            ...(extractedNumbers.length > 0 ? { difficultyIndex: antiWinDifficultyConfig.difficultyIndex } : {}),
+        }, { render: true, notifyEngineSync: false });
 
         // Mini board
         syncRegiaBoardCells();
@@ -3470,7 +3361,6 @@ function startTombolaApp() {
         const previewImg = document.getElementById('regiaTvGraphicPreview');
         const previewPlaceholder = document.getElementById('regiaGraphicPlaceholder');
         const previewWrapper = document.getElementById('regiaPreviewImgWrapper');
-        const badge = document.getElementById('regiaTvGraphicBadge');
         const toggle = document.getElementById('regiaTvGraphicToggle');
 
         if (previewImg) {
@@ -3483,22 +3373,10 @@ function startTombolaApp() {
         if (previewWrapper) {
             previewWrapper.className = `regia-preview-img-wrapper border-${tvGraphicState.borderStyle}`;
         }
-        if (badge) {
-            if (tvGraphicState.enabled) {
-                badge.className = 'regia-card-badge';
-                badge.style.background = '#10b981';
-                badge.style.color = '#ffffff';
-                badge.textContent = 'TV LIVE';
-            } else {
-                badge.className = 'regia-card-badge';
-                badge.style.background = 'rgba(255,255,255,0.1)';
-                badge.style.color = '#94a3b8';
-                badge.textContent = 'TV Disattivo';
-            }
-        }
         if (toggle && toggle.checked !== tvGraphicState.enabled) {
             toggle.checked = tvGraphicState.enabled;
         }
+        regiaStateManager.syncGraphicsState({ ...tvGraphicState });
 
         const headerSlot = document.getElementById('headerTvGraphicSlot');
         const headerImg = document.getElementById('headerTvGraphicImg');
@@ -3676,213 +3554,9 @@ function startTombolaApp() {
         }
     }
 
-    // ===== GESTIONE CASSA CLOUD MONTEPREMI NON VINTI (DATABASE FIREBASE) =====
-    let cloudBankBalance = 0;
-    let cloudBankCurrency = '€';
-    let cloudBankConnected = false;
-    let regiaProfilesCache = [];
-    let activeRegiaProfileId = 'high';
-
-    function updateProfileCloudStatusBadge(fromCloud, customLabel) {
-        const badgeEl = document.getElementById('regiaProfileCloudStatus');
-        if (!badgeEl) return;
-        if (customLabel) {
-            badgeEl.innerHTML = `<i class="fas fa-database"></i> ${customLabel}`;
-            badgeEl.style.color = fromCloud ? '#4ade80' : '#facc15';
-            return;
-        }
-        if (fromCloud) {
-            badgeEl.innerHTML = '<i class="fas fa-database"></i> Cloud DB';
-            badgeEl.style.color = '#4ade80';
-        } else {
-            badgeEl.innerHTML = '<i class="fas fa-database"></i> Cache Locale';
-            badgeEl.style.color = '#facc15';
-        }
-    }
-
-    function populateRegiaProfileSelect(profiles, selectedId) {
-        const selectEl = document.getElementById('regiaProfileSelect');
-        if (!selectEl || !Array.isArray(profiles) || profiles.length === 0) return;
-        selectEl.innerHTML = profiles
-            .map((p) => {
-                const safeId = String(p.id).replace(/"/g, '&quot;');
-                const safeName = String(p.name || p.id).replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                const suffix = p.isPreset ? '' : ' ★';
-                return `<option value="${safeId}">${safeName}${suffix}</option>`;
-            })
-            .join('');
-        if (selectedId && profiles.some(p => p.id === selectedId)) {
-            selectEl.value = selectedId;
-        } else {
-            selectEl.value = profiles[0].id;
-        }
-    }
-
-    function applyRegiaProfileToEngine(profile) {
-        if (!profile) return;
-        activeRegiaProfileId = profile.id;
-        antiWinDifficultyConfig.enabled = Boolean(profile.enabled);
-        antiWinDifficultyConfig.level = profile.difficultyLevel || 'custom';
-        antiWinDifficultyConfig.forcedMin.ambo = Number(profile.forcedMinAmbo) || 15;
-        antiWinDifficultyConfig.forcedMin.terno = Number(profile.forcedMinTerno) || 28;
-        antiWinDifficultyConfig.forcedMin.quaterna = Number(profile.forcedMinQuaterna) || 42;
-        antiWinDifficultyConfig.forcedMin.cinquina = Number(profile.forcedMinCinquina) || 58;
-        antiWinDifficultyConfig.forcedMin.tombola = Number(profile.forcedMinTombola) || 75;
-
-        prizeDelaysConfig.gold.max = Number(profile.delayMaxGold) || 25;
-        prizeDelaysConfig.ambo.max = Number(profile.delayMaxAmbo) || 20;
-        prizeDelaysConfig.terno.max = Number(profile.delayMaxTerno) || 35;
-        prizeDelaysConfig.quaterna.max = Number(profile.delayMaxQuaterna) || 50;
-        prizeDelaysConfig.cinquina.max = Number(profile.delayMaxCinquina) || 65;
-        prizeDelaysConfig.tombola.max = Number(profile.delayMaxTombola) || 85;
-
-        const nameInput = document.getElementById('regiaProfileNameInput');
-        if (nameInput && document.activeElement !== nameInput) {
-            nameInput.value = profile.name || profile.id;
-        }
-        const selectEl = document.getElementById('regiaProfileSelect');
-        if (selectEl) {
-            selectEl.value = profile.id;
-        }
-
-        syncRegiaUI();
-    }
-
-    async function initRegiaProfilesFromCloud() {
-        if (!window.JackpotService) {
-            updateProfileCloudStatusBadge(false, 'Locale');
-            return;
-        }
-        try {
-            const [{ profiles, fromCloud }, activeId] = await Promise.all([
-                window.JackpotService.getRegiaProfiles(),
-                window.JackpotService.getActiveRegiaProfileId(),
-            ]);
-            if (Array.isArray(profiles) && profiles.length > 0) {
-                regiaProfilesCache = profiles;
-                const chosen = profiles.find(p => p.id === activeId) || profiles[0];
-                populateRegiaProfileSelect(profiles, chosen.id);
-                applyRegiaProfileToEngine(chosen);
-                updateProfileCloudStatusBadge(fromCloud);
-                logRegiaEvent(`Profilo Regia caricato (${fromCloud ? 'Firestore Cloud' : 'Cache Locale'}): "${chosen.name}".`, 'info');
-            }
-        } catch (err) {
-            console.warn('Error loading Regia profiles from cloud:', err);
-            updateProfileCloudStatusBadge(false);
-        }
-    }
-
+    // ===== GESTIONE CASSA CLOUD & PROFILI REGIA (DELEGATO A RegiaStateManager) =====
     async function initCloudJackpotManager() {
-        const statusEl = document.getElementById('regiaCloudStatus');
-        const balanceEl = document.getElementById('regiaCloudBalance');
-        const updatedEl = document.getElementById('regiaCloudLastUpdated');
-        
-        if (!window.JackpotService) {
-            if (statusEl) statusEl.innerHTML = '<span class="cloud-dot offline"></span> Modulo non pronto';
-            return;
-        }
-
-        try {
-            if (statusEl) statusEl.innerHTML = '<span class="cloud-dot online"></span> Connessione...';
-            const ok = await window.JackpotService.initFirebaseJackpot();
-            cloudBankConnected = ok;
-            
-            if (statusEl) {
-                if (ok) {
-                    statusEl.innerHTML = '<span class="cloud-dot online"></span> Connesso Cloud';
-                } else {
-                    statusEl.innerHTML = '<span class="cloud-dot offline"></span> Offline';
-                }
-            }
-
-            // Inizializza saldo iniziale
-            try {
-                const initialBank = await window.JackpotService.getJackpotBank();
-                cloudBankBalance = Number(initialBank.accumulatedUnclaimed) || 0;
-                cloudBankCurrency = initialBank.currency || '€';
-                if (balanceEl) {
-                    balanceEl.textContent = `${cloudBankCurrency} ${cloudBankBalance.toFixed(2)}`;
-                }
-                if (updatedEl && initialBank.lastUpdated) {
-                    try {
-                        const d = new Date(initialBank.lastUpdated);
-                        updatedEl.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                    } catch (_) {
-                        updatedEl.textContent = initialBank.lastUpdated;
-                    }
-                }
-            } catch (err) {
-                console.warn('Initial jackpot bank fetch:', err);
-            }
-
-            // Real-time subscription al documento di cassa
-            window.JackpotService.subscribeToJackpotBank((bankData) => {
-                cloudBankBalance = Number(bankData.accumulatedUnclaimed) || 0;
-                cloudBankCurrency = bankData.currency || '€';
-                if (balanceEl) {
-                    balanceEl.textContent = `${cloudBankCurrency} ${cloudBankBalance.toFixed(2)}`;
-                }
-                if (updatedEl && bankData.lastUpdated) {
-                    try {
-                        const d = new Date(bankData.lastUpdated);
-                        updatedEl.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                    } catch (_) {
-                        updatedEl.textContent = bankData.lastUpdated;
-                    }
-                }
-                refreshCloudHistoryUI();
-            });
-
-            // Caricamento storico movimenti e profili Regia salvati
-            refreshCloudHistoryUI();
-            initRegiaProfilesFromCloud();
-        } catch (err) {
-            console.error('Error starting Cloud Jackpot Manager:', err);
-            if (statusEl) statusEl.innerHTML = '<span class="cloud-dot offline"></span> Errore';
-            initRegiaProfilesFromCloud();
-        }
-    }
-
-    async function refreshCloudHistoryUI() {
-        const historyListEl = document.getElementById('regiaCloudHistoryList');
-        if (!historyListEl || !window.JackpotService) return;
-
-        try {
-            const list = await window.JackpotService.getUnclaimedHistory(8);
-            if (!list || list.length === 0) {
-                historyListEl.innerHTML = '<div class="history-empty">Nessun movimento registrato finora</div>';
-                return;
-            }
-
-            let html = '';
-            for (const item of list) {
-                const dateStr = item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
-                let typeClass = 'deposit';
-                let sign = '+';
-                let label = 'Deposito';
-                if (item.type === 'recalled_into_game') {
-                    typeClass = 'recall';
-                    sign = '-';
-                    label = 'Richiamo';
-                } else if (item.type === 'reset') {
-                    typeClass = 'reset';
-                    sign = '';
-                    label = 'Azzera';
-                }
-                html += `
-                    <div class="history-entry ${typeClass}">
-                        <div class="entry-left">
-                            <span class="entry-time"><i class="far fa-clock"></i> ${dateStr} - ${label} [${item.gameId || 'TOM'}]</span>
-                            <span class="entry-note">${item.note || ''}</span>
-                        </div>
-                        <span class="entry-amount">${sign}€ ${(item.amount || 0).toFixed(2)}</span>
-                    </div>
-                `;
-            }
-            historyListEl.innerHTML = html;
-        } catch (err) {
-            console.warn('Failed rendering cloud history:', err);
-        }
+        await regiaStateManager.initFirestoreSync();
     }
 
     function initializeApp() {
@@ -3941,6 +3615,7 @@ function startTombolaApp() {
         document.getElementById('currencySelect').addEventListener('change', function() {
             updatePrizes();
             syncRegiaUI();
+            void regiaStateManager.syncRegiaCardsWithFirestore({ immediate: true, source: 'regia_currency' });
             if (window.TombolaSync) {
                 window.TombolaSync.broadcastPrizePoolUpdate(parseFloat(document.getElementById('prizePool').value) || 0, this.value);
             }
@@ -4272,12 +3947,14 @@ function startTombolaApp() {
             updatePrizes();
             logRegiaEvent(`Montepremi aggiornato a ${curr} ${val.toFixed(2)}.`, 'info');
             syncRegiaUI();
+            void regiaStateManager.syncRegiaCardsWithFirestore({ immediate: true, source: 'regia_prizes' });
         });
 
         document.getElementById('regiaCurrencySelect').addEventListener('change', function() {
             document.getElementById('currencySelect').value = this.value;
             updatePrizes();
             syncRegiaUI();
+            void regiaStateManager.syncRegiaCardsWithFirestore({ immediate: true, source: 'regia_currency' });
         });
 
         document.getElementById('regiaResetUnclaimedBtn').addEventListener('click', function() {
@@ -4296,14 +3973,10 @@ function startTombolaApp() {
             );
         });
 
-        // 1. Salva Montepremi Non Vinti in Cloud Database
+        // 1. Salva Montepremi Non Vinti in Cloud Database (via RegiaStateManager)
         const saveCloudBtn = document.getElementById('regiaSaveToCloudBtn');
         if (saveCloudBtn) {
             saveCloudBtn.addEventListener('click', async function() {
-                if (!window.JackpotService) {
-                    showErrorPopup("Servizio Cloud non inizializzato.");
-                    return;
-                }
                 if (unclaimedGoldTotal <= 0) {
                     showSuccessPopup(currentLanguage === 'it' 
                         ? "Nessun premio non vinto nella partita corrente da salvare." 
@@ -4312,14 +3985,14 @@ function startTombolaApp() {
                 }
 
                 const amountToSave = unclaimedGoldTotal;
-                const currency = document.getElementById('currencySelect').value || '€';
-                const gameId = document.getElementById('gameId').value || 'TOM001';
+                const currency = document.getElementById('currencySelect')?.value || '€';
+                const gameId = document.getElementById('gameId')?.value || 'TOM001';
 
                 saveCloudBtn.disabled = true;
                 saveCloudBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Salvataggio...';
 
                 try {
-                    const res = await window.JackpotService.saveUnclaimedToDatabase(
+                    const res = await regiaStateManager.depositUnclaimedToFirestore(
                         amountToSave,
                         currency,
                         'all',
@@ -4335,7 +4008,6 @@ function startTombolaApp() {
                         showSuccessPopup(currentLanguage === 'it' 
                             ? `Salvati ${currency} ${amountToSave.toFixed(2)} nel Database Cloud!` 
                             : `Saved ${currency} ${amountToSave.toFixed(2)} to Cloud Database!`);
-                        if (typeof refreshCloudHistoryUI === 'function') refreshCloudHistoryUI();
                     } else {
                         showErrorPopup("Errore nel salvataggio: " + (res.error || "Riprova"));
                     }
@@ -4349,19 +4021,14 @@ function startTombolaApp() {
             });
         }
 
-        // 2. Richiama Totale Salvato nel Montepremi della Partita Attuale
+        // 2. Richiama Totale Salvato nel Montepremi della Partita Attuale (via RegiaStateManager)
         const recallCloudBtn = document.getElementById('regiaRecallFromCloudBtn');
         if (recallCloudBtn) {
             recallCloudBtn.addEventListener('click', async function() {
-                if (!window.JackpotService) {
-                    showErrorPopup("Servizio Cloud non disponibile.");
-                    return;
-                }
-
                 try {
                     recallCloudBtn.disabled = true;
                     recallCloudBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Lettura...';
-                    const currentBank = await window.JackpotService.getJackpotBank();
+                    const currentBank = await regiaStateManager.syncBankFromFirestore();
                     recallCloudBtn.disabled = false;
                     recallCloudBtn.innerHTML = '<i class="fas fa-cloud-download-alt"></i> Richiama nel Montepremi';
 
@@ -4373,8 +4040,8 @@ function startTombolaApp() {
                     }
 
                     const amountToRecall = currentBank.accumulatedUnclaimed;
-                    const currency = currentBank.currency || document.getElementById('currencySelect').value || '€';
-                    const gameId = document.getElementById('gameId').value || 'TOM001';
+                    const currency = currentBank.currency || document.getElementById('currencySelect')?.value || '€';
+                    const gameId = document.getElementById('gameId')?.value || 'TOM001';
 
                     showConfirmDialog(
                         currentLanguage === 'it' ? "Richiama Montepremi Cloud" : "Recall Cloud Jackpot",
@@ -4386,22 +4053,21 @@ function startTombolaApp() {
                             recallCloudBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Richiamo...';
 
                             try {
-                                const res = await window.JackpotService.recallUnclaimedIntoGame(
+                                const res = await regiaStateManager.recallUnclaimedFromFirestore(
                                     amountToRecall,
                                     gameId,
                                     `Richiamo nel Montepremi partita ${gameId}`
                                 );
 
                                 if (res.success) {
-                                    // Aggiunge al montepremi della partita corrente
-                                    const currentPool = parseFloat(document.getElementById('prizePool').value) || 0;
+                                    const currentPool = parseFloat(document.getElementById('prizePool')?.value || '0') || 0;
                                     const newPool = Math.round((currentPool + res.recalledAmount) * 100) / 100;
-                                    document.getElementById('prizePool').value = newPool.toFixed(2);
+                                    const poolInput = document.getElementById('prizePool');
+                                    if (poolInput) poolInput.value = newPool.toFixed(2);
                                     
                                     updatePrizes();
                                     syncRegiaUI();
 
-                                    // Mostra il badge di Rollover sulla TV
                                     const tvBadge = document.getElementById('tvRolloverBadge');
                                     const tvText = document.getElementById('tvRolloverText');
                                     if (tvBadge && tvText) {
@@ -4413,7 +4079,6 @@ function startTombolaApp() {
                                     showSuccessPopup(currentLanguage === 'it'
                                         ? `Richiamati ${currency} ${res.recalledAmount.toFixed(2)} nel Montepremi attuale!`
                                         : `Recalled ${currency} ${res.recalledAmount.toFixed(2)} into current Prize Pool!`);
-                                    if (typeof refreshCloudHistoryUI === 'function') refreshCloudHistoryUI();
                                 } else {
                                     showErrorPopup("Errore nel richiamo: " + (res.error || "Riprova"));
                                 }
@@ -4438,8 +4103,7 @@ function startTombolaApp() {
         const resetCloudBtn = document.getElementById('regiaResetCloudBtn');
         if (resetCloudBtn) {
             resetCloudBtn.addEventListener('click', function() {
-                if (!window.JackpotService) return;
-                const gameId = document.getElementById('gameId').value || 'TOM001';
+                const gameId = document.getElementById('gameId')?.value || 'TOM001';
 
                 showConfirmDialog(
                     currentLanguage === 'it' ? "Azzera Database Cassa Cloud" : "Reset Cloud Database",
@@ -4449,11 +4113,10 @@ function startTombolaApp() {
                     async function() {
                         resetCloudBtn.disabled = true;
                         try {
-                            const res = await window.JackpotService.resetJackpotBank(gameId, "Azzeramento manuale da Regia");
+                            const res = await regiaStateManager.resetBankInFirestore(gameId, "Azzeramento manuale da Regia");
                             if (res.success) {
                                 logRegiaEvent("Database Cassa Cloud azzerato dall'amministratore.", 'warn');
                                 showSuccessPopup(currentLanguage === 'it' ? "Database Cassa Cloud azzerato!" : "Cloud Database Bank reset!");
-                                if (typeof refreshCloudHistoryUI === 'function') refreshCloudHistoryUI();
                             } else {
                                 showErrorPopup("Errore nell'azzeramento: " + (res.error || "Riprova"));
                             }
@@ -4472,13 +4135,10 @@ function startTombolaApp() {
         const syncCloudBtn = document.getElementById('regiaSyncCloudBtn');
         if (syncCloudBtn) {
             syncCloudBtn.addEventListener('click', async function() {
-                if (!window.JackpotService) return;
                 syncCloudBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
                 try {
-                    const bank = await window.JackpotService.getJackpotBank();
-                    const balanceEl = document.getElementById('regiaCloudBalance');
-                    if (balanceEl) balanceEl.textContent = `${bank.currency || '€'} ${(bank.accumulatedUnclaimed || 0).toFixed(2)}`;
-                    if (typeof refreshCloudHistoryUI === 'function') await refreshCloudHistoryUI();
+                    await regiaStateManager.syncBankFromFirestore();
+                    await regiaStateManager.loadProfilesFromFirestore();
                     showSuccessPopup("Database sincronizzato!");
                 } catch (e) {
                     console.error('Sync error:', e);
@@ -4514,70 +4174,47 @@ function startTombolaApp() {
             prizeDelaysConfig.quaterna.max = getIntVal('delayInputQuaterna', 5, 90, prizeDelaysConfig.quaterna.max);
             prizeDelaysConfig.cinquina.max = getIntVal('delayInputCinquina', 5, 90, prizeDelaysConfig.cinquina.max);
             prizeDelaysConfig.tombola.max = getIntVal('delayInputTombola', 5, 90, prizeDelaysConfig.tombola.max);
+
+            return {
+                enabled: antiWinDifficultyConfig.enabled,
+                level: antiWinDifficultyConfig.level,
+                forcedMin: { ...antiWinDifficultyConfig.forcedMin },
+                delays: {
+                    gold: { max: prizeDelaysConfig.gold.max, expired: prizeDelaysConfig.gold.expired },
+                    ambo: { max: prizeDelaysConfig.ambo.max, expired: prizeDelaysConfig.ambo.expired },
+                    terno: { max: prizeDelaysConfig.terno.max, expired: prizeDelaysConfig.terno.expired },
+                    quaterna: { max: prizeDelaysConfig.quaterna.max, expired: prizeDelaysConfig.quaterna.expired },
+                    cinquina: { max: prizeDelaysConfig.cinquina.max, expired: prizeDelaysConfig.cinquina.expired },
+                    tombola: { max: prizeDelaysConfig.tombola.max, expired: prizeDelaysConfig.tombola.expired },
+                },
+            };
         };
 
         const profileSelectEl = document.getElementById('regiaProfileSelect');
         if (profileSelectEl) {
             profileSelectEl.addEventListener('change', async function() {
-                const selectedId = this.value;
-                const found = regiaProfilesCache.find(p => p.id === selectedId);
-                if (!found) return;
-                applyRegiaProfileToEngine(found);
-                logRegiaEvent(`Profilo "${found.name}" caricato e applicato.`, 'info');
-                if (window.JackpotService) {
-                    await window.JackpotService.setActiveRegiaProfileId(found.id);
-                }
+                await regiaStateManager.selectProfile(this.value, true);
             });
         }
 
         const newProfileBtn = document.getElementById('regiaNewProfileBtn');
         if (newProfileBtn) {
             newProfileBtn.addEventListener('click', function() {
-                readAllEngineInputsIntoConfig();
-                const customCount = regiaProfilesCache.filter(p => !p.isPreset).length + 1;
-                const newName = `Profilo Personalizzato ${customCount}`;
-                const newId = window.JackpotService
-                    ? window.JackpotService.sanitizeProfileId(`custom_${customCount}_${Date.now().toString(36)}`)
-                    : `custom_${customCount}_${Date.now()}`;
-
-                const draftProfile = {
-                    id: newId,
-                    name: newName,
-                    isPreset: false,
-                    enabled: antiWinDifficultyConfig.enabled,
-                    difficultyLevel: 'custom',
-                    forcedMinAmbo: antiWinDifficultyConfig.forcedMin.ambo,
-                    forcedMinTerno: antiWinDifficultyConfig.forcedMin.terno,
-                    forcedMinQuaterna: antiWinDifficultyConfig.forcedMin.quaterna,
-                    forcedMinCinquina: antiWinDifficultyConfig.forcedMin.cinquina,
-                    forcedMinTombola: antiWinDifficultyConfig.forcedMin.tombola,
-                    delayMaxGold: prizeDelaysConfig.gold.max,
-                    delayMaxAmbo: prizeDelaysConfig.ambo.max,
-                    delayMaxTerno: prizeDelaysConfig.terno.max,
-                    delayMaxQuaterna: prizeDelaysConfig.quaterna.max,
-                    delayMaxCinquina: prizeDelaysConfig.cinquina.max,
-                    delayMaxTombola: prizeDelaysConfig.tombola.max,
-                    updatedAt: new Date().toISOString()
-                };
-
-                regiaProfilesCache.push(draftProfile);
-                populateRegiaProfileSelect(regiaProfilesCache, draftProfile.id);
-                applyRegiaProfileToEngine(draftProfile);
-
+                const overrides = readAllEngineInputsIntoConfig();
+                const draftProfile = regiaStateManager.createDraftProfile(overrides);
                 const nameInput = document.getElementById('regiaProfileNameInput');
                 if (nameInput) {
-                    nameInput.value = newName;
+                    nameInput.value = draftProfile.name;
                     nameInput.focus();
                     nameInput.select();
                 }
-                logRegiaEvent(`Nuovo profilo bozza creato: "${newName}". Modifica i valori e premi "Salva DB".`, 'info');
             });
         }
 
         const saveProfileBtn = document.getElementById('regiaSaveProfileBtn');
         if (saveProfileBtn) {
             saveProfileBtn.addEventListener('click', async function() {
-                readAllEngineInputsIntoConfig();
+                const overrides = readAllEngineInputsIntoConfig();
                 const nameInput = document.getElementById('regiaProfileNameInput');
                 const enteredName = nameInput ? nameInput.value.trim() : '';
                 if (!enteredName) {
@@ -4586,72 +4223,16 @@ function startTombolaApp() {
                     return;
                 }
 
-                const existing = regiaProfilesCache.find(p => p.id === activeRegiaProfileId);
-                let targetId = activeRegiaProfileId;
-                let isPreset = existing ? Boolean(existing.isPreset) : false;
-
-                // Se l'utente ha rinominato un preset predefinito, salva come nuovo profilo personalizzato senza sovrascrivere il preset base
-                if (isPreset && existing && enteredName !== existing.name) {
-                    const slug = window.JackpotService
-                        ? window.JackpotService.sanitizeProfileId(enteredName)
-                        : enteredName.toLowerCase().replace(/[^a-z0-9]+/g, '_');
-                    targetId = ['high', 'medium', 'normal', 'random'].includes(slug)
-                        ? `${slug}_custom_${Date.now().toString(36)}`
-                        : slug;
-                    isPreset = false;
-                }
-
-                const payload = {
-                    id: targetId,
-                    name: enteredName,
-                    isPreset,
-                    enabled: antiWinDifficultyConfig.enabled,
-                    difficultyLevel: antiWinDifficultyConfig.level,
-                    forcedMinAmbo: antiWinDifficultyConfig.forcedMin.ambo,
-                    forcedMinTerno: antiWinDifficultyConfig.forcedMin.terno,
-                    forcedMinQuaterna: antiWinDifficultyConfig.forcedMin.quaterna,
-                    forcedMinCinquina: antiWinDifficultyConfig.forcedMin.cinquina,
-                    forcedMinTombola: antiWinDifficultyConfig.forcedMin.tombola,
-                    delayMaxGold: prizeDelaysConfig.gold.max,
-                    delayMaxAmbo: prizeDelaysConfig.ambo.max,
-                    delayMaxTerno: prizeDelaysConfig.terno.max,
-                    delayMaxQuaterna: prizeDelaysConfig.quaterna.max,
-                    delayMaxCinquina: prizeDelaysConfig.cinquina.max,
-                    delayMaxTombola: prizeDelaysConfig.tombola.max,
-                };
-
-                const origHtml = saveProfileBtn.innerHTML;
-                saveProfileBtn.disabled = true;
-                saveProfileBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Salvataggio...';
-
                 try {
-                    if (window.JackpotService) {
-                        const res = await window.JackpotService.saveRegiaProfile(payload);
-                        const savedProf = res.profile;
-                        const idx = regiaProfilesCache.findIndex(p => p.id === savedProf.id);
-                        if (idx >= 0) regiaProfilesCache[idx] = savedProf;
-                        else regiaProfilesCache.push(savedProf);
-
-                        populateRegiaProfileSelect(regiaProfilesCache, savedProf.id);
-                        applyRegiaProfileToEngine(savedProf);
-                        updateProfileCloudStatusBadge(res.savedToCloud);
-
-                        if (res.savedToCloud) {
-                            logRegiaEvent(`Profilo "${savedProf.name}" salvato e sincronizzato nel database Firestore.`, 'win');
-                            showSuccessPopup(`Profilo "${savedProf.name}" salvato nel Database Cloud!`);
-                        } else {
-                            logRegiaEvent(`Profilo "${savedProf.name}" salvato in cache locale (Cloud non disponibile).`, 'warn');
-                            showSuccessPopup(`Profilo "${savedProf.name}" salvato in locale (Database Cloud offline).`);
-                        }
+                    const res = await regiaStateManager.saveCurrentProfileToFirestore(enteredName, overrides);
+                    if (res.savedToCloud) {
+                        showSuccessPopup(`Profilo "${res.profile.name}" salvato nel Database Cloud!`);
                     } else {
-                        showSuccessPopup('Servizio Database non disponibile.');
+                        showSuccessPopup(`Profilo "${res.profile.name}" salvato in locale (Database Cloud offline).`);
                     }
                 } catch (err) {
                     console.error('Errore salvataggio profilo:', err);
                     logRegiaEvent('Errore durante il salvataggio del profilo nel database.', 'warn');
-                } finally {
-                    saveProfileBtn.disabled = false;
-                    saveProfileBtn.innerHTML = origHtml;
                 }
             });
         }
@@ -4659,7 +4240,8 @@ function startTombolaApp() {
         const deleteProfileBtn = document.getElementById('regiaDeleteProfileBtn');
         if (deleteProfileBtn) {
             deleteProfileBtn.addEventListener('click', function() {
-                const targetProf = regiaProfilesCache.find(p => p.id === activeRegiaProfileId);
+                const { engine } = regiaStateManager.getState();
+                const targetProf = engine.profiles.find(p => p.id === engine.activeProfileId);
                 if (!targetProf || targetProf.isPreset) {
                     showSuccessPopup('I profili predefiniti non possono essere eliminati.');
                     return;
@@ -4669,18 +4251,7 @@ function startTombolaApp() {
                     'Elimina Profilo Database',
                     `Vuoi eliminare definitivamente il profilo <strong>${targetProf.name}</strong> dal database Firestore?`,
                     async function() {
-                        if (window.JackpotService) {
-                            await window.JackpotService.deleteRegiaProfile(targetProf.id);
-                        }
-                        regiaProfilesCache = regiaProfilesCache.filter(p => p.id !== targetProf.id);
-                        const fallback = regiaProfilesCache.find(p => p.id === 'high') || regiaProfilesCache[0];
-                        if (fallback) {
-                            populateRegiaProfileSelect(regiaProfilesCache, fallback.id);
-                            applyRegiaProfileToEngine(fallback);
-                            if (window.JackpotService) {
-                                await window.JackpotService.setActiveRegiaProfileId(fallback.id);
-                            }
-                        }
+                        await regiaStateManager.deleteProfileFromFirestore(targetProf.id);
                         logRegiaEvent(`Profilo "${targetProf.name}" eliminato dal database.`, 'warn');
                         showSuccessPopup(`Profilo "${targetProf.name}" eliminato.`);
                     }
@@ -4694,6 +4265,7 @@ function startTombolaApp() {
                 readAllEngineInputsIntoConfig();
                 logRegiaEvent(`Soglie applicate alla partita: Min Ambo (${antiWinDifficultyConfig.forcedMin.ambo}) / Max Gold (${prizeDelaysConfig.gold.max}), Tomb Min (${antiWinDifficultyConfig.forcedMin.tombola}) / Max (${prizeDelaysConfig.tombola.max}).`, 'info');
                 syncRegiaUI();
+                void regiaStateManager.syncRegiaCardsWithFirestore({ immediate: true, source: 'regia_thresholds' });
                 showSuccessPopup(currentLanguage === 'it' ? "Soglie e parametri applicati alla partita corrente!" : "Thresholds applied to current game!");
             });
         }
@@ -4718,6 +4290,7 @@ function startTombolaApp() {
                 prizeDelaysConfig.tombola.max = defaultHigh.delayMax.tombola;
                 logRegiaEvent('Soglie Min/Max ripristinate ai valori predefiniti.', 'info');
                 syncRegiaUI();
+                void regiaStateManager.syncRegiaCardsWithFirestore({ immediate: true, source: 'regia_reset_thresholds' });
             });
         }
 
@@ -4817,10 +4390,7 @@ function startTombolaApp() {
         });
 
         document.getElementById('regiaClearLogBtn').addEventListener('click', function() {
-            const logContent = document.getElementById('regiaLogContent');
-            if (logContent) {
-                logContent.innerHTML = '<div class="log-entry info"><span class="log-time">LIVE</span> Registro pulito. Sistema pronto.</div>';
-            }
+            regiaStateManager.clearLogs();
         });
 
         // Cartelle Section Controls
@@ -5001,23 +4571,7 @@ function startTombolaApp() {
         window.TombolaSync.on('STATE_INIT', applyRemoteGameState);
         window.TombolaSync.on('FULL_STATE_SYNC', applyRemoteGameState);
 
-        // 10. Aggiorna badge stato WebSocket in console Regia
-        window.TombolaSync.onStatusChange((status, clientCount) => {
-            const badge = document.getElementById('regiaWsBadge');
-            const txt = document.getElementById('regiaWsText');
-            if (badge && txt) {
-                if (status === 'connected') {
-                    badge.className = 'regia-ws-badge active';
-                    txt.textContent = `WS Live (${clientCount} ${clientCount === 1 ? 'schermo' : 'schermi'})`;
-                } else if (status === 'connecting') {
-                    badge.className = 'regia-ws-badge connecting';
-                    txt.textContent = `Connessione WS...`;
-                } else {
-                    badge.className = 'regia-ws-badge offline';
-                    txt.textContent = `WS Locale (BroadcastChannel)`;
-                }
-            }
-        });
+        // 10. Lo stato WebSocket e la latenza nell'intestazione Regia sono gestiti centralmente da RegiaStateManager + ClientWebSocketManager
 
         // Pulsante in Regia: Apri TV Studio (2° Monitor / Nuova Finestra)
         const openTvExtBtn = document.getElementById('regiaOpenTvExtBtn');

@@ -151,6 +151,41 @@
         }
       },
       "required": ["activeProfileId", "updatedAt"]
+    },
+    "RegiaGameConfig": {
+      "title": "RegiaGameConfig",
+      "description": "Single unified Firestore document storing persistent Regia configuration parameters (difficulty, thresholds, prizes) across configuration cards.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "activeProfileId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "difficulty": {
+          "type": "object",
+          "description": "Difficulty algorithm settings and forced minimums."
+        },
+        "thresholds": {
+          "type": "object",
+          "description": "Maximum extraction thresholds for each prize tier."
+        },
+        "prizes": {
+          "type": "object",
+          "description": "Active prize pool and currency configuration."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 40
+        }
+      },
+      "required": ["id", "activeProfileId", "difficulty", "thresholds", "prizes", "updatedAt"]
     }
   },
   "firestore": {
@@ -169,6 +204,10 @@
     "/regia_settings/{settingId}": {
       "schema": "ActiveRegiaSettings",
       "description": "Active Regia configuration pointing to the selected profile."
+    },
+    "/regia_config/{configId}": {
+      "schema": "RegiaGameConfig",
+      "description": "Unified single-document store of live Regia parameters (difficulty, thresholds, prizes) preventing duplication across cards."
     }
   }
 }

@@ -1,6 +1,8 @@
 import './tombola-luxury.css';
 import * as jackpotService from './firebase-jackpot-service';
 (window as any).JackpotService = jackpotService;
+import { regiaStateManager } from './regia-state-manager';
+(window as any).RegiaState = regiaStateManager;
 import { realtimeSync, type ConnectionStatus, type RealtimeMessage } from './realtime-sync';
 import './tombola-controller.js';
 import './online-guide-manager';
@@ -10,6 +12,7 @@ import {
   getTransportState,
   initWebSocket,
   isBroadcastFallbackActive,
+  isRelativeFallbackActive,
   reconnectWebSocket,
   sendRealtimeMessage,
   setCustomWebSocketUrl,
@@ -19,12 +22,48 @@ import {
  * ============================================================================
  * ORCHESTRATORE REAL-TIME LATO CLIENT (REGIA <-> SCHERMO TV)
  * ============================================================================
- * Utilizza initWebSocket() (src/websocket.ts) e gli URL di src/config.ts per
- * sincronizzare tabellone, contatori e vincite tra Console Regia e TV Studio,
- * con verifica all'avvio e attivazione automatica del fallback BroadcastChannel.
+ * Coordina il trasporto WebSocket / BroadcastChannel (src/websocket.ts) e
+ * delega la sincronizzazione centralizzata di tutte le `.regia-card` UI e
+ * del database Firestore al gestore di stato `regiaStateManager`.
  */
 
-const STARTUP_CHECK_TIMEOUT_MS = 4500;
+const STARTUP_CHECK_TIMEOUT_MS = 6500;
+let unsubscribePersistentCardsSync: (() => void) | null = null;
+
+/**
+ * Sincronizzazione persistente centralizzata delle `.regia-card`:
+ * salva in un unico documento Firestore (`regia_config/main`) i parametri
+ * di gioco (difficoltà, soglie, premi) evitando duplicazioni tra le card.
+ */
+export async function syncRegiaCardsWithFirestore(options: {
+  immediate?: boolean;
+  source?: string;
+} = {}): Promise<boolean> {
+  return regiaStateManager.syncRegiaCardsWithFirestore(options);
+}
+
+/**
+ * Attiva l'osservazione persistente sulle `.regia-card` di configurazione
+ * (difficoltà/soglie e premi) dopo l'idratazione iniziale da Firestore.
+ */
+export function initPersistentRegiaCardsSync(): () => void {
+  if (unsubscribePersistentCardsSync) {
+    return unsubscribePersistentCardsSync;
+  }
+
+  unsubscribePersistentCardsSync = regiaStateManager.subscribe((_state, changedSection) => {
+    if (regiaStateManager.getIsApplyingRemoteConfig()) return;
+    if (changedSection === 'engine' || changedSection === 'prizes') {
+      void syncRegiaCardsWithFirestore({ source: changedSection });
+    }
+  });
+
+  return unsubscribePersistentCardsSync;
+}
+
+if (typeof window !== 'undefined') {
+  (window as any).syncRegiaCardsWithFirestore = syncRegiaCardsWithFirestore;
+}
 
 interface ExtractionPayload {
   type: string;
@@ -51,6 +90,10 @@ class ClientWebSocketManager {
     this.bindRealtimeBus();
 
     const boot = () => {
+      regiaStateManager.renderAllCardsToDOM();
+      void regiaStateManager.initFirestoreSync().finally(() => {
+        initPersistentRegiaCardsSync();
+      });
       this.wireAlertControls();
       this.connect();
       this.verifyWebSocketConnectionOnStartup();
@@ -78,7 +121,7 @@ class ClientWebSocketManager {
     if (retryBtn) {
       retryBtn.addEventListener('click', () => {
         this.alertDismissedByUser = false;
-        this.appendRegiaLog("Nuovo tentativo di connessione WebSocket avviato dall'operatore...", 'info');
+        regiaStateManager.addLog("Nuovo tentativo di connessione WebSocket avviato dall'operatore...", 'info');
         this.reconnect();
       });
     }
@@ -143,39 +186,64 @@ class ClientWebSocketManager {
       role: this.getClientRole(),
       onMessage: (data, origin) => this.handleIncomingData(data, origin),
       onStatusChange: (status: ConnectionStatus, clientCount: number, fallbackActive: boolean) => {
-        if (status === 'connected') {
-          this.updateWsBadge('active', `WS Live (${clientCount} ${clientCount === 1 ? 'schermo' : 'schermi'})`);
-        } else if (status === 'connecting') {
-          this.updateWsBadge('connecting', 'Connessione WS...');
-        } else {
-          this.updateWsBadge(
-            'offline',
-            fallbackActive ? 'WS Locale (Fallback)' : 'WS In Riconnessione...'
-          );
-        }
+        const transport = getTransportState();
+        regiaStateManager.syncConnectionState({
+          status,
+          clientCount,
+          fallbackActive,
+          wsUrl: transport.wsUrl,
+          latencyMs: status === 'connected' ? transport.latencyMs : 0,
+        });
         realtimeSync.notifyStatus(status, clientCount);
       },
       onConnected: (wsUrl: string) => {
         this.startupVerified = true;
         this.clearStartupCheckTimer();
         this.hideUnreachableNotification();
-        console.log(`⚡ [WS-Client] Connesso con successo a ${wsUrl}`);
-        this.appendRegiaLog(`⚡ WebSocket connesso in tempo reale (${wsUrl}).`, 'info');
+        regiaStateManager.syncConnectionState({
+          status: 'connected',
+          wsUrl,
+          fallbackActive: false,
+        });
+        const usedRelativeFallback = isRelativeFallbackActive();
+        console.log(
+          `⚡ [WS-Client] Connesso con successo a ${wsUrl}${usedRelativeFallback ? ' (fallback URL relativo)' : ''}`
+        );
+        regiaStateManager.addLog(
+          usedRelativeFallback
+            ? `⚡ WebSocket connesso tramite fallback relativo (${wsUrl}).`
+            : `⚡ WebSocket connesso in tempo reale (${wsUrl}).`,
+          'info'
+        );
+      },
+      onRelativeFallbackActivated: (relativeUrl: string, reason: string) => {
+        regiaStateManager.syncConnectionState({
+          wsUrl: relativeUrl,
+          fallbackActive: false,
+        });
+        console.warn(`[WS-Fallback] ${reason} -> tentativo fallback relativo su ${relativeUrl}`);
+        regiaStateManager.addLog(
+          `🔄 Server esterno irraggiungibile: fallback automatico su URL relativo (${relativeUrl}).`,
+          'warn'
+        );
       },
       onFallbackActivated: (reason: string) => {
         this.clearStartupCheckTimer();
+        regiaStateManager.syncConnectionState({ fallbackActive: true });
         this.notifyServerUnreachable(reason);
       },
       onLatency: (latencyMs: number) => {
-        this.updateLatencyUI(latencyMs);
+        regiaStateManager.syncConnectionState({ latencyMs });
         realtimeSync.notifyLatency(latencyMs);
       },
       onClientCount: (count: number) => {
-        const state = getTransportState();
-        this.updateWsBadge(
-          state.status === 'connected' ? 'active' : 'connecting',
-          `WS Live (${count} ${count === 1 ? 'schermo' : 'schermi'})`
-        );
+        const transport = getTransportState();
+        regiaStateManager.syncConnectionState({
+          status: transport.status,
+          clientCount: count,
+          wsUrl: transport.wsUrl,
+          fallbackActive: transport.fallbackActive,
+        });
       },
       onRawLog: (message, level) => {
         if (level === 'error') console.error(message);
@@ -201,7 +269,7 @@ class ClientWebSocketManager {
 
   /**
    * Verifica la connessione WebSocket all'avvio:
-   * - Registra ambiente/URL nel log console e Regia
+   * - Registra ambiente/URL nel log console e RegiaStateManager
    * - Se il server è irraggiungibile entro timeoutMs, conferma fallback BroadcastChannel
    *   e mostra la notifica nella UI della Regia.
    */
@@ -214,7 +282,7 @@ class ClientWebSocketManager {
     console.info(
       `[WS-Startup] Verifica connessione all'avvio | ambiente=${cfg.environment} | appUrl=${cfg.appUrl} | wsUrl=${targetUrl || 'non configurato'} | fallback=${state.fallbackActive}`
     );
-    this.appendRegiaLog(
+    regiaStateManager.addLog(
       `Verifica WebSocket all'avvio (${cfg.environment.toUpperCase()}): ${targetUrl || 'nessun server remoto -> BroadcastChannel'}`,
       'info'
     );
@@ -244,22 +312,9 @@ class ClientWebSocketManager {
     }
   }
 
-  private appendRegiaLog(text: string, type: 'info' | 'win' | 'error' | 'warn' = 'info') {
-    if (typeof document === 'undefined') return;
-    const logContent = document.getElementById('regiaLogContent');
-    if (!logContent) return;
-
-    const entry = document.createElement('div');
-    entry.className = `log-entry ${type}`;
-    const timeStr = new Date().toLocaleTimeString('it-IT');
-    entry.innerHTML = `<span class="log-time">[${timeStr}]</span> ${text}`;
-    logContent.appendChild(entry);
-    logContent.scrollTop = logContent.scrollHeight;
-  }
-
   private notifyServerUnreachable(reason: string) {
-    console.error(`[WS-Startup] ❌ ${reason}`);
-    this.appendRegiaLog(`⚠️ ${reason}`, 'error');
+    console.warn(`[WS-Startup] ⚠️ ${reason}`);
+    regiaStateManager.addLog(`⚠️ ${reason}`, 'warn');
 
     if (this.alertDismissedByUser) return;
 
@@ -332,11 +387,13 @@ class ClientWebSocketManager {
 
       case 'TIMER_STARTED':
       case 'REGIA_START_TIMER':
+        regiaStateManager.syncExtractionState({ isRunning: true });
         this.handleTimerStatus(true);
         break;
 
       case 'TIMER_PAUSED':
       case 'REGIA_PAUSE_TIMER':
+        regiaStateManager.syncExtractionState({ isRunning: false });
         this.handleTimerStatus(false);
         break;
 
@@ -357,6 +414,16 @@ class ClientWebSocketManager {
       case 'UPDATE_UNCLAIMED':
         if (!handledByController) {
           this.updateUnclaimedPot(data.unclaimedPot);
+        }
+        break;
+
+      case 'PRIZE_POOL_UPDATED':
+      case 'UPDATE_PRIZES':
+        if (!handledByController && typeof data.prizePool === 'number') {
+          regiaStateManager.syncPrizesState({
+            prizePool: data.prizePool,
+            currency: data.currency || undefined,
+          });
         }
         break;
 
@@ -520,10 +587,7 @@ class ClientWebSocketManager {
 
   private updateUnclaimedPot(amount: number) {
     if (typeof amount === 'number') {
-      const unclaimedEl = document.getElementById('unclaimedPotDisplay');
-      if (unclaimedEl) unclaimedEl.textContent = `€ ${amount.toFixed(2)}`;
-      const regiaUnclaimedEl = document.getElementById('regiaUnclaimedVal');
-      if (regiaUnclaimedEl) regiaUnclaimedEl.textContent = `€ ${amount.toFixed(2)}`;
+      regiaStateManager.syncPrizesState({ unclaimedCurrentGame: amount });
     }
   }
 
@@ -545,59 +609,8 @@ class ClientWebSocketManager {
       this.updateCurrentNumberDisplay(state.currentNumber);
     }
   }
-
-  private updateLatencyUI(latency: number) {
-    const dot = document.getElementById('wsHeartbeatDot');
-    if (dot) {
-      dot.classList.remove('beat');
-      void dot.offsetWidth;
-      dot.classList.add('beat');
-    }
-
-    let quality: 'excellent' | 'good' | 'fair' = 'excellent';
-    if (latency >= 160) quality = 'fair';
-    else if (latency >= 60) quality = 'good';
-
-    const bars = document.getElementById('wsSignalBars');
-    if (bars) bars.className = `ws-signal-bars ${quality}`;
-
-    const pill = document.getElementById('wsLatencyPill');
-    if (pill) pill.className = `ws-latency-pill ${quality}`;
-
-    const val = document.getElementById('wsLatencyVal');
-    if (val) val.textContent = `${latency} ms`;
-  }
-
-  private updateWsBadge(status: 'active' | 'connecting' | 'offline', label: string) {
-    const badge = document.getElementById('regiaWsBadge');
-    const txt = document.getElementById('regiaWsText');
-    const state = getTransportState();
-    if (badge) {
-      badge.className = `regia-ws-badge ${status}`;
-      if (state.wsUrl) {
-        badge.title = `WebSocket Live: ${state.wsUrl}`;
-      }
-    }
-    if (txt) {
-      txt.textContent = label;
-    }
-    const bars = document.getElementById('wsSignalBars');
-    const pill = document.getElementById('wsLatencyPill');
-    const val = document.getElementById('wsLatencyVal');
-    if (status === 'offline') {
-      if (bars) bars.className = 'ws-signal-bars offline';
-      if (pill) pill.className = 'ws-latency-pill offline';
-      if (val) val.textContent = '-- ms';
-    } else if (status === 'connecting') {
-      if (bars) bars.className = 'ws-signal-bars';
-      if (pill) pill.className = 'ws-latency-pill';
-      if (val) val.textContent = '... ms';
-    } else if (status === 'active' && state.latencyMs === 0) {
-      if (bars) bars.className = 'ws-signal-bars excellent';
-      if (pill) pill.className = 'ws-latency-pill excellent';
-    }
-  }
 }
 
+export { regiaStateManager };
 export const clientWsManager = new ClientWebSocketManager();
 (window as any).ClientWsManager = clientWsManager;

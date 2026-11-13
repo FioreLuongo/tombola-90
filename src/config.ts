@@ -1,16 +1,16 @@
-import { normalizeToWsUrl, resolveWebSocketUrl } from './utils/ws-url';
+import { isStaticOnlyHost, normalizeToWsUrl, resolveWebSocketUrl } from './utils/ws-url';
 
 /**
  * Configurazione centralizzata dell'applicazione (URL di hosting & WebSocket).
- * Legge import.meta.env.VITE_APP_URL e import.meta.env.VITE_WS_URL con
- * fallback automatico sugli URL relativi/correnti per funzionare sia in locale
- * (localhost:3000) sia su hosting cloud (Cloud Run, Render, GitHub Pages, ecc.).
+ * Garantisce che VITE_WS_URL e VITE_APP_URL siano popolati dall'ambiente di deploy
+ * con fallback automatico sugli URL relativi (/ws, /api/health) in locale e in cloud.
  */
 
 export interface RuntimeConfigOverrides {
   viteAppUrl?: string;
   viteWsUrl?: string;
   configuredAppUrl?: string;
+  configuredWsUrl?: string;
   search?: string;
   storedWsUrl?: string | null;
   windowProtocol?: string;
@@ -26,17 +26,20 @@ export interface ResolvedAppConfig {
   appUrl: string;
   wsUrl: string | null;
   relativeWsPath: string;
+  relativeWsUrl: string | null;
   healthCheckUrl: string;
 }
 
 const DEFAULT_RELATIVE_WS_PATH = '/ws';
 const DEFAULT_RELATIVE_HEALTH_PATH = '/api/health';
 const CUSTOM_WS_STORAGE_KEY = 'tombola90_ws_url';
+const PLACEHOLDER_ENV = new Set(['MY_APP_URL', 'MY_WS_URL', 'undefined', 'null', '']);
 
 function safeMetaEnv(key: 'VITE_APP_URL' | 'VITE_WS_URL'): string {
   try {
     const env = (import.meta as unknown as { env?: Record<string, string | undefined> })?.env;
-    return env?.[key]?.trim() || '';
+    const raw = env?.[key]?.trim() || '';
+    return PLACEHOLDER_ENV.has(raw) ? '' : raw;
   } catch {
     return '';
   }
@@ -44,9 +47,23 @@ function safeMetaEnv(key: 'VITE_APP_URL' | 'VITE_WS_URL'): string {
 
 function safeConfiguredHostingUrl(): string {
   try {
-    return typeof __APP_HOSTING_URL__ !== 'undefined' && __APP_HOSTING_URL__
-      ? String(__APP_HOSTING_URL__).trim()
-      : '';
+    if (typeof __APP_HOSTING_URL__ !== 'undefined' && __APP_HOSTING_URL__) {
+      const raw = String(__APP_HOSTING_URL__).trim();
+      return PLACEHOLDER_ENV.has(raw) ? '' : raw;
+    }
+    return '';
+  } catch {
+    return '';
+  }
+}
+
+function safeConfiguredWsUrl(): string {
+  try {
+    if (typeof __APP_WS_URL__ !== 'undefined' && __APP_WS_URL__) {
+      const raw = String(__APP_WS_URL__).trim();
+      return PLACEHOLDER_ENV.has(raw) ? '' : raw;
+    }
+    return '';
   } catch {
     return '';
   }
@@ -81,7 +98,7 @@ function safeStoredWsUrl(): string | null {
 function normalizeHttpUrl(raw?: string | null): string {
   if (!raw) return '';
   const trimmed = raw.trim();
-  if (!trimmed || trimmed === 'MY_APP_URL') return '';
+  if (!trimmed || PLACEHOLDER_ENV.has(trimmed)) return '';
   if (trimmed.startsWith('/')) return trimmed.replace(/\/+$/, '') || '/';
   try {
     const withProto = /^https?:\/\//i.test(trimmed)
@@ -93,11 +110,30 @@ function normalizeHttpUrl(raw?: string | null): string {
   }
 }
 
+export function resolveRelativeWsUrlFromLocation(
+  windowProtocol?: string,
+  windowHost?: string,
+  windowHostname?: string,
+  relativePath: string = DEFAULT_RELATIVE_WS_PATH
+): string | null {
+  const cleanPath = relativePath.startsWith('/') ? relativePath : `/${relativePath}`;
+  if (windowHostname && isStaticOnlyHost(windowHostname)) {
+    return null;
+  }
+  if (windowHost) {
+    const wsProto = windowProtocol === 'https:' ? 'wss:' : 'ws:';
+    return `${wsProto}//${windowHost}${cleanPath}`;
+  }
+  return cleanPath;
+}
+
 export function resolveRuntimeAppConfig(overrides: RuntimeConfigOverrides = {}): ResolvedAppConfig {
   const winLoc = safeWindowLocation();
   const viteAppUrl = (overrides.viteAppUrl ?? safeMetaEnv('VITE_APP_URL')).trim();
-  const viteWsUrlRaw = (overrides.viteWsUrl ?? safeMetaEnv('VITE_WS_URL')).trim();
   const configuredAppUrl = (overrides.configuredAppUrl ?? safeConfiguredHostingUrl()).trim();
+  const rawMetaWs = overrides.viteWsUrl !== undefined ? overrides.viteWsUrl.trim() : safeMetaEnv('VITE_WS_URL');
+  const rawConfiguredWs =
+    overrides.configuredWsUrl !== undefined ? overrides.configuredWsUrl.trim() : safeConfiguredWsUrl();
 
   const windowHostname = overrides.windowHostname ?? winLoc.hostname;
   const windowHost = overrides.windowHost ?? winLoc.host;
@@ -111,21 +147,42 @@ export function resolveRuntimeAppConfig(overrides: RuntimeConfigOverrides = {}):
     windowHostname === 'localhost' ||
     windowHostname === '127.0.0.1';
 
-  // Fallback su URL relativi/origin corrente se VITE_APP_URL non è impostata
-  const appUrl =
+  // Popola VITE_WS_URL dall'ambiente di deploy (o derivando dall'APP_URL configurata), con fallback relativo "/ws"
+  const effectiveAppOrigin =
     normalizeHttpUrl(viteAppUrl) ||
     normalizeHttpUrl(windowOrigin) ||
     normalizeHttpUrl(configuredAppUrl) ||
     '/';
 
+  const derivedWsFromDeploy =
+    !rawMetaWs && !rawConfiguredWs && !isLocal && effectiveAppOrigin !== '/' && !isStaticOnlyHost(windowHostname)
+      ? normalizeToWsUrl(effectiveAppOrigin) || DEFAULT_RELATIVE_WS_PATH
+      : '';
+
+  const viteWsUrlRaw =
+    rawMetaWs ||
+    rawConfiguredWs ||
+    derivedWsFromDeploy ||
+    DEFAULT_RELATIVE_WS_PATH;
+
+  // Risolve URL relativo per fallback automatico su server sullo stesso host
+  const relativeWsUrl = resolveRelativeWsUrlFromLocation(
+    windowProtocol,
+    windowHost,
+    windowHostname,
+    viteWsUrlRaw.startsWith('/') ? viteWsUrlRaw : DEFAULT_RELATIVE_WS_PATH
+  );
+
   // Gestione supporto esplicito URL relativo in VITE_WS_URL (es. "/ws")
   let normalizedViteWs = viteWsUrlRaw;
-  if (viteWsUrlRaw.startsWith('/') && windowHost) {
-    const wsProto = windowProtocol === 'https:' ? 'wss:' : 'ws:';
-    const cleanPath = viteWsUrlRaw.endsWith('/ws') ? viteWsUrlRaw : `${viteWsUrlRaw.replace(/\/+$/, '')}/ws`;
-    normalizedViteWs = `${wsProto}//${windowHost}${cleanPath}`;
-  } else if (viteWsUrlRaw.startsWith('/')) {
-    normalizedViteWs = '';
+  if (viteWsUrlRaw.startsWith('/')) {
+    if (windowHost && !isStaticOnlyHost(windowHostname)) {
+      const wsProto = windowProtocol === 'https:' ? 'wss:' : 'ws:';
+      const cleanPath = viteWsUrlRaw.endsWith('/ws') ? viteWsUrlRaw : `${viteWsUrlRaw.replace(/\/+$/, '')}/ws`;
+      normalizedViteWs = `${wsProto}//${windowHost}${cleanPath}`;
+    } else {
+      normalizedViteWs = '';
+    }
   }
 
   let wsUrl = resolveWebSocketUrl({
@@ -139,27 +196,29 @@ export function resolveRuntimeAppConfig(overrides: RuntimeConfigOverrides = {}):
     windowHostname,
   });
 
-  // Fallback relativo quando siamo in ambiente senza windowHost esplicito ma con VITE_WS_URL relativo
-  if (!wsUrl && viteWsUrlRaw.startsWith('/')) {
+  // Fallback relativo quando siamo senza windowHost esplicito ma con path relativo configurato
+  if (!wsUrl && viteWsUrlRaw.startsWith('/') && !isStaticOnlyHost(windowHostname)) {
     wsUrl = viteWsUrlRaw;
   }
 
-  // Normalizzazione eventuale su base URL configurata se resolveWebSocketUrl ha restituito null su host sconosciuti
-  if (!wsUrl && viteAppUrl) {
-    wsUrl = normalizeToWsUrl(viteAppUrl);
+  // Fallback su relativa same-origin se nessun URL esterno valido è stato risolto
+  if (!wsUrl && relativeWsUrl) {
+    wsUrl = relativeWsUrl;
   }
 
-  const healthCheckUrl = appUrl && appUrl !== '/'
-    ? `${appUrl.replace(/\/+$/, '')}${DEFAULT_RELATIVE_HEALTH_PATH}`
-    : DEFAULT_RELATIVE_HEALTH_PATH;
+  const healthCheckUrl =
+    effectiveAppOrigin && effectiveAppOrigin !== '/'
+      ? `${effectiveAppOrigin.replace(/\/+$/, '')}${DEFAULT_RELATIVE_HEALTH_PATH}`
+      : DEFAULT_RELATIVE_HEALTH_PATH;
 
   return {
     environment: isLocal ? 'local' : 'cloud',
     viteAppUrl,
     viteWsUrl: viteWsUrlRaw,
-    appUrl,
+    appUrl: effectiveAppOrigin,
     wsUrl,
     relativeWsPath: DEFAULT_RELATIVE_WS_PATH,
+    relativeWsUrl,
     healthCheckUrl,
   };
 }
@@ -170,6 +229,10 @@ export function getAppBaseUrl(): string {
 
 export function getWebSocketUrl(): string | null {
   return resolveRuntimeAppConfig().wsUrl;
+}
+
+export function getRelativeWebSocketUrl(overrides: RuntimeConfigOverrides = {}): string | null {
+  return resolveRuntimeAppConfig(overrides).relativeWsUrl;
 }
 
 export const APP_CONFIG: ResolvedAppConfig = resolveRuntimeAppConfig();

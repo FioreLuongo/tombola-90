@@ -71,12 +71,14 @@ const defaultGameState: ServerGameState = {
 let currentGameState: ServerGameState = { ...defaultGameState };
 
 // Initialize WebSocket Server safely via noServer to avoid conflicting with other upgrade paths
-const wss = new WebSocketServer({ noServer: true });
+// perMessageDeflate: false avoids proxy negotiation failures on Cloud Run / reverse proxies
+const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
 
 server.on('upgrade', (request, socket, head) => {
   try {
     const reqUrl = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`);
-    if (reqUrl.pathname === '/ws') {
+    const normalizedPath = reqUrl.pathname.replace(/\/+$/, '') || '/';
+    if (normalizedPath === '/ws') {
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit('connection', ws, request);
       });
@@ -103,6 +105,10 @@ function broadcast(message: object, excludeSender?: WebSocket) {
 
 wss.on('connection', (ws: WebSocket, req) => {
   const clientIp = req.socket.remoteAddress;
+  (ws as WebSocket & { isAlive?: boolean }).isAlive = true;
+  ws.on('pong', () => {
+    (ws as WebSocket & { isAlive?: boolean }).isAlive = true;
+  });
   console.log(`[WebSocket] Nuovo client connesso da ${clientIp}. Totale connessioni: ${wss.clients.size}`);
 
   // Send current authoritative game state immediately to newly connected screen (TV Studio or Regia)
@@ -294,6 +300,27 @@ wss.on('connection', (ws: WebSocket, req) => {
   ws.on('error', (err) => {
     console.error('[WebSocket] Errore socket:', err);
   });
+});
+
+// Keepalive protocol ping per evitare timeout dei proxy Cloud Run su connessioni inattive
+const wsKeepAliveTimer = setInterval(() => {
+  wss.clients.forEach((client) => {
+    const tracked = client as WebSocket & { isAlive?: boolean };
+    if (tracked.isAlive === false) {
+      tracked.terminate();
+      return;
+    }
+    tracked.isAlive = false;
+    try {
+      tracked.ping();
+    } catch {
+      // Ignore transient ping errors
+    }
+  });
+}, 25000);
+
+wss.on('close', () => {
+  clearInterval(wsKeepAliveTimer);
 });
 
 // Setup Express Middlewares & Routes
