@@ -1,3 +1,8 @@
+import * as jackpotServiceModule from './firebase-jackpot-service';
+if (typeof window !== 'undefined' && !window.JackpotService) {
+    window.JackpotService = jackpotServiceModule;
+}
+
 function startTombolaApp() {
     // ===== VARIABILI GLOBALI =====
     let extractedNumbers =[];
@@ -784,9 +789,11 @@ function startTombolaApp() {
                 if (willTerno && totalExtracted < forced.terno) { riskScore += 100000; blocksWin = true; }
                 if (willAmbo && totalExtracted < forced.ambo) { riskScore += 50000; blocksWin = true; }
 
-                // In modalità Difficoltà Alta: penalità per concentrazione su cartelle già avanzate (spalma estrazioni)
+                // In modalità Difficoltà Alta/Custom: penalità per concentrazione su cartelle già avanzate (spalma estrazioni)
                 if (antiWinDifficultyConfig.level === 'high') {
                     riskScore += (cartella.extractedNumbers ? cartella.extractedNumbers.length : 0) * 3;
+                } else if (antiWinDifficultyConfig.level === 'custom') {
+                    riskScore += (cartella.extractedNumbers ? cartella.extractedNumbers.length : 0) * 2;
                 } else if (antiWinDifficultyConfig.level === 'medium') {
                     riskScore += (cartella.extractedNumbers ? cartella.extractedNumbers.length : 0);
                 }
@@ -3352,12 +3359,12 @@ function startTombolaApp() {
                     stat.textContent = 'SCADUTO ➜ Cassa';
                 } else {
                     stat.className = 'delay-status-badge';
-                    stat.textContent = `Entro ${conf.max} estr.`;
+                    stat.textContent = `Entro ${conf.max}`;
                 }
             }
         });
 
-        // Box B: Algoritmo Difficoltà Vincite (Anti-Vincita)
+        // Box Unificato: Algoritmo Difficoltà Vincite & Profili DB
         const masterToggle = document.getElementById('regiaDifficultyMasterToggle');
         const levelSelect = document.getElementById('regiaDifficultyLevelSelect');
         const minAmboInp = document.getElementById('forcedMinAmbo');
@@ -3365,6 +3372,8 @@ function startTombolaApp() {
         const minQuaternaInp = document.getElementById('forcedMinQuaterna');
         const minCinquinaInp = document.getElementById('forcedMinCinquina');
         const minTombolaInp = document.getElementById('forcedMinTombola');
+        const profileSelectEl = document.getElementById('regiaProfileSelect');
+        const deleteProfileBtn = document.getElementById('regiaDeleteProfileBtn');
 
         if (masterToggle) masterToggle.checked = antiWinDifficultyConfig.enabled;
         if (levelSelect && document.activeElement !== levelSelect) levelSelect.value = antiWinDifficultyConfig.level;
@@ -3373,6 +3382,28 @@ function startTombolaApp() {
         if (minQuaternaInp && document.activeElement !== minQuaternaInp) minQuaternaInp.value = antiWinDifficultyConfig.forcedMin.quaterna;
         if (minCinquinaInp && document.activeElement !== minCinquinaInp) minCinquinaInp.value = antiWinDifficultyConfig.forcedMin.cinquina;
         if (minTombolaInp && document.activeElement !== minTombolaInp) minTombolaInp.value = antiWinDifficultyConfig.forcedMin.tombola;
+        if (profileSelectEl && document.activeElement !== profileSelectEl && activeRegiaProfileId) {
+            profileSelectEl.value = activeRegiaProfileId;
+        }
+        if (deleteProfileBtn) {
+            const currentProf = regiaProfilesCache.find(p => p.id === activeRegiaProfileId);
+            const isPreset = currentProf ? Boolean(currentProf.isPreset) : ['high', 'medium', 'normal', 'random'].includes(activeRegiaProfileId);
+            deleteProfileBtn.disabled = isPreset;
+            deleteProfileBtn.title = isPreset
+                ? 'I profili predefiniti non possono essere eliminati (puoi modificarli e salvarli come nuovo profilo)'
+                : 'Elimina il profilo personalizzato dal database Firestore';
+        }
+
+        // Aggiorna indice difficoltà stimato quando non ci sono ancora estrazioni attive
+        if (extractedNumbers.length === 0) {
+            if (!antiWinDifficultyConfig.enabled || antiWinDifficultyConfig.level === 'random') {
+                antiWinDifficultyConfig.difficultyIndex = 0;
+            } else {
+                const fm = antiWinDifficultyConfig.forcedMin;
+                const avgRatio = ((fm.ambo / 20) + (fm.terno / 35) + (fm.quaterna / 50) + (fm.cinquina / 65) + (fm.tombola / 85)) / 5;
+                antiWinDifficultyConfig.difficultyIndex = Math.min(98, Math.max(25, Math.round(avgRatio * 88)));
+            }
+        }
 
         const monitoredEl = document.getElementById('regiaMonitoredCards');
         const blockedEl = document.getElementById('regiaBlockedNumbersCount');
@@ -3649,6 +3680,97 @@ function startTombolaApp() {
     let cloudBankBalance = 0;
     let cloudBankCurrency = '€';
     let cloudBankConnected = false;
+    let regiaProfilesCache = [];
+    let activeRegiaProfileId = 'high';
+
+    function updateProfileCloudStatusBadge(fromCloud, customLabel) {
+        const badgeEl = document.getElementById('regiaProfileCloudStatus');
+        if (!badgeEl) return;
+        if (customLabel) {
+            badgeEl.innerHTML = `<i class="fas fa-database"></i> ${customLabel}`;
+            badgeEl.style.color = fromCloud ? '#4ade80' : '#facc15';
+            return;
+        }
+        if (fromCloud) {
+            badgeEl.innerHTML = '<i class="fas fa-database"></i> Cloud DB';
+            badgeEl.style.color = '#4ade80';
+        } else {
+            badgeEl.innerHTML = '<i class="fas fa-database"></i> Cache Locale';
+            badgeEl.style.color = '#facc15';
+        }
+    }
+
+    function populateRegiaProfileSelect(profiles, selectedId) {
+        const selectEl = document.getElementById('regiaProfileSelect');
+        if (!selectEl || !Array.isArray(profiles) || profiles.length === 0) return;
+        selectEl.innerHTML = profiles
+            .map((p) => {
+                const safeId = String(p.id).replace(/"/g, '&quot;');
+                const safeName = String(p.name || p.id).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                const suffix = p.isPreset ? '' : ' ★';
+                return `<option value="${safeId}">${safeName}${suffix}</option>`;
+            })
+            .join('');
+        if (selectedId && profiles.some(p => p.id === selectedId)) {
+            selectEl.value = selectedId;
+        } else {
+            selectEl.value = profiles[0].id;
+        }
+    }
+
+    function applyRegiaProfileToEngine(profile) {
+        if (!profile) return;
+        activeRegiaProfileId = profile.id;
+        antiWinDifficultyConfig.enabled = Boolean(profile.enabled);
+        antiWinDifficultyConfig.level = profile.difficultyLevel || 'custom';
+        antiWinDifficultyConfig.forcedMin.ambo = Number(profile.forcedMinAmbo) || 15;
+        antiWinDifficultyConfig.forcedMin.terno = Number(profile.forcedMinTerno) || 28;
+        antiWinDifficultyConfig.forcedMin.quaterna = Number(profile.forcedMinQuaterna) || 42;
+        antiWinDifficultyConfig.forcedMin.cinquina = Number(profile.forcedMinCinquina) || 58;
+        antiWinDifficultyConfig.forcedMin.tombola = Number(profile.forcedMinTombola) || 75;
+
+        prizeDelaysConfig.gold.max = Number(profile.delayMaxGold) || 25;
+        prizeDelaysConfig.ambo.max = Number(profile.delayMaxAmbo) || 20;
+        prizeDelaysConfig.terno.max = Number(profile.delayMaxTerno) || 35;
+        prizeDelaysConfig.quaterna.max = Number(profile.delayMaxQuaterna) || 50;
+        prizeDelaysConfig.cinquina.max = Number(profile.delayMaxCinquina) || 65;
+        prizeDelaysConfig.tombola.max = Number(profile.delayMaxTombola) || 85;
+
+        const nameInput = document.getElementById('regiaProfileNameInput');
+        if (nameInput && document.activeElement !== nameInput) {
+            nameInput.value = profile.name || profile.id;
+        }
+        const selectEl = document.getElementById('regiaProfileSelect');
+        if (selectEl) {
+            selectEl.value = profile.id;
+        }
+
+        syncRegiaUI();
+    }
+
+    async function initRegiaProfilesFromCloud() {
+        if (!window.JackpotService) {
+            updateProfileCloudStatusBadge(false, 'Locale');
+            return;
+        }
+        try {
+            const [{ profiles, fromCloud }, activeId] = await Promise.all([
+                window.JackpotService.getRegiaProfiles(),
+                window.JackpotService.getActiveRegiaProfileId(),
+            ]);
+            if (Array.isArray(profiles) && profiles.length > 0) {
+                regiaProfilesCache = profiles;
+                const chosen = profiles.find(p => p.id === activeId) || profiles[0];
+                populateRegiaProfileSelect(profiles, chosen.id);
+                applyRegiaProfileToEngine(chosen);
+                updateProfileCloudStatusBadge(fromCloud);
+                logRegiaEvent(`Profilo Regia caricato (${fromCloud ? 'Firestore Cloud' : 'Cache Locale'}): "${chosen.name}".`, 'info');
+            }
+        } catch (err) {
+            console.warn('Error loading Regia profiles from cloud:', err);
+            updateProfileCloudStatusBadge(false);
+        }
+    }
 
     async function initCloudJackpotManager() {
         const statusEl = document.getElementById('regiaCloudStatus');
@@ -3711,11 +3833,13 @@ function startTombolaApp() {
                 refreshCloudHistoryUI();
             });
 
-            // Caricamento storico movimenti
+            // Caricamento storico movimenti e profili Regia salvati
             refreshCloudHistoryUI();
+            initRegiaProfilesFromCloud();
         } catch (err) {
             console.error('Error starting Cloud Jackpot Manager:', err);
             if (statusEl) statusEl.innerHTML = '<span class="cloud-dot offline"></span> Errore';
+            initRegiaProfilesFromCloud();
         }
     }
 
@@ -4364,40 +4488,235 @@ function startTombolaApp() {
             });
         }
 
-        // Event listeners per Box A: Scadenza Premi
-        const saveDelaysFromInputs = () => {
-            const getVal = (id, def) => {
+        // Event listeners per Box Unificato: Controllo Difficoltà, Soglie & Profili DB
+        const readAllEngineInputsIntoConfig = () => {
+            const getIntVal = (id, minV, maxV, fallback) => {
                 const el = document.getElementById(id);
-                return el ? (parseInt(el.value) || def) : def;
+                const parsed = el ? parseInt(el.value, 10) : NaN;
+                if (isNaN(parsed)) return fallback;
+                return Math.min(maxV, Math.max(minV, parsed));
             };
-            prizeDelaysConfig.gold.max = getVal('delayInputGold', 25);
-            prizeDelaysConfig.ambo.max = getVal('delayInputAmbo', 20);
-            prizeDelaysConfig.terno.max = getVal('delayInputTerno', 35);
-            prizeDelaysConfig.quaterna.max = getVal('delayInputQuaterna', 50);
-            prizeDelaysConfig.cinquina.max = getVal('delayInputCinquina', 65);
-            prizeDelaysConfig.tombola.max = getVal('delayInputTombola', 85);
+
+            const masterToggle = document.getElementById('regiaDifficultyMasterToggle');
+            const levelSelect = document.getElementById('regiaDifficultyLevelSelect');
+            if (masterToggle) antiWinDifficultyConfig.enabled = masterToggle.checked;
+            if (levelSelect) antiWinDifficultyConfig.level = levelSelect.value || 'custom';
+
+            antiWinDifficultyConfig.forcedMin.ambo = getIntVal('forcedMinAmbo', 1, 90, antiWinDifficultyConfig.forcedMin.ambo);
+            antiWinDifficultyConfig.forcedMin.terno = getIntVal('forcedMinTerno', 1, 90, antiWinDifficultyConfig.forcedMin.terno);
+            antiWinDifficultyConfig.forcedMin.quaterna = getIntVal('forcedMinQuaterna', 1, 90, antiWinDifficultyConfig.forcedMin.quaterna);
+            antiWinDifficultyConfig.forcedMin.cinquina = getIntVal('forcedMinCinquina', 1, 90, antiWinDifficultyConfig.forcedMin.cinquina);
+            antiWinDifficultyConfig.forcedMin.tombola = getIntVal('forcedMinTombola', 1, 90, antiWinDifficultyConfig.forcedMin.tombola);
+
+            prizeDelaysConfig.gold.max = getIntVal('delayInputGold', 5, 90, prizeDelaysConfig.gold.max);
+            prizeDelaysConfig.ambo.max = getIntVal('delayInputAmbo', 5, 90, prizeDelaysConfig.ambo.max);
+            prizeDelaysConfig.terno.max = getIntVal('delayInputTerno', 5, 90, prizeDelaysConfig.terno.max);
+            prizeDelaysConfig.quaterna.max = getIntVal('delayInputQuaterna', 5, 90, prizeDelaysConfig.quaterna.max);
+            prizeDelaysConfig.cinquina.max = getIntVal('delayInputCinquina', 5, 90, prizeDelaysConfig.cinquina.max);
+            prizeDelaysConfig.tombola.max = getIntVal('delayInputTombola', 5, 90, prizeDelaysConfig.tombola.max);
         };
+
+        const profileSelectEl = document.getElementById('regiaProfileSelect');
+        if (profileSelectEl) {
+            profileSelectEl.addEventListener('change', async function() {
+                const selectedId = this.value;
+                const found = regiaProfilesCache.find(p => p.id === selectedId);
+                if (!found) return;
+                applyRegiaProfileToEngine(found);
+                logRegiaEvent(`Profilo "${found.name}" caricato e applicato.`, 'info');
+                if (window.JackpotService) {
+                    await window.JackpotService.setActiveRegiaProfileId(found.id);
+                }
+            });
+        }
+
+        const newProfileBtn = document.getElementById('regiaNewProfileBtn');
+        if (newProfileBtn) {
+            newProfileBtn.addEventListener('click', function() {
+                readAllEngineInputsIntoConfig();
+                const customCount = regiaProfilesCache.filter(p => !p.isPreset).length + 1;
+                const newName = `Profilo Personalizzato ${customCount}`;
+                const newId = window.JackpotService
+                    ? window.JackpotService.sanitizeProfileId(`custom_${customCount}_${Date.now().toString(36)}`)
+                    : `custom_${customCount}_${Date.now()}`;
+
+                const draftProfile = {
+                    id: newId,
+                    name: newName,
+                    isPreset: false,
+                    enabled: antiWinDifficultyConfig.enabled,
+                    difficultyLevel: 'custom',
+                    forcedMinAmbo: antiWinDifficultyConfig.forcedMin.ambo,
+                    forcedMinTerno: antiWinDifficultyConfig.forcedMin.terno,
+                    forcedMinQuaterna: antiWinDifficultyConfig.forcedMin.quaterna,
+                    forcedMinCinquina: antiWinDifficultyConfig.forcedMin.cinquina,
+                    forcedMinTombola: antiWinDifficultyConfig.forcedMin.tombola,
+                    delayMaxGold: prizeDelaysConfig.gold.max,
+                    delayMaxAmbo: prizeDelaysConfig.ambo.max,
+                    delayMaxTerno: prizeDelaysConfig.terno.max,
+                    delayMaxQuaterna: prizeDelaysConfig.quaterna.max,
+                    delayMaxCinquina: prizeDelaysConfig.cinquina.max,
+                    delayMaxTombola: prizeDelaysConfig.tombola.max,
+                    updatedAt: new Date().toISOString()
+                };
+
+                regiaProfilesCache.push(draftProfile);
+                populateRegiaProfileSelect(regiaProfilesCache, draftProfile.id);
+                applyRegiaProfileToEngine(draftProfile);
+
+                const nameInput = document.getElementById('regiaProfileNameInput');
+                if (nameInput) {
+                    nameInput.value = newName;
+                    nameInput.focus();
+                    nameInput.select();
+                }
+                logRegiaEvent(`Nuovo profilo bozza creato: "${newName}". Modifica i valori e premi "Salva DB".`, 'info');
+            });
+        }
+
+        const saveProfileBtn = document.getElementById('regiaSaveProfileBtn');
+        if (saveProfileBtn) {
+            saveProfileBtn.addEventListener('click', async function() {
+                readAllEngineInputsIntoConfig();
+                const nameInput = document.getElementById('regiaProfileNameInput');
+                const enteredName = nameInput ? nameInput.value.trim() : '';
+                if (!enteredName) {
+                    showSuccessPopup('Inserisci un nome valido per il profilo prima di salvare.');
+                    if (nameInput) nameInput.focus();
+                    return;
+                }
+
+                const existing = regiaProfilesCache.find(p => p.id === activeRegiaProfileId);
+                let targetId = activeRegiaProfileId;
+                let isPreset = existing ? Boolean(existing.isPreset) : false;
+
+                // Se l'utente ha rinominato un preset predefinito, salva come nuovo profilo personalizzato senza sovrascrivere il preset base
+                if (isPreset && existing && enteredName !== existing.name) {
+                    const slug = window.JackpotService
+                        ? window.JackpotService.sanitizeProfileId(enteredName)
+                        : enteredName.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+                    targetId = ['high', 'medium', 'normal', 'random'].includes(slug)
+                        ? `${slug}_custom_${Date.now().toString(36)}`
+                        : slug;
+                    isPreset = false;
+                }
+
+                const payload = {
+                    id: targetId,
+                    name: enteredName,
+                    isPreset,
+                    enabled: antiWinDifficultyConfig.enabled,
+                    difficultyLevel: antiWinDifficultyConfig.level,
+                    forcedMinAmbo: antiWinDifficultyConfig.forcedMin.ambo,
+                    forcedMinTerno: antiWinDifficultyConfig.forcedMin.terno,
+                    forcedMinQuaterna: antiWinDifficultyConfig.forcedMin.quaterna,
+                    forcedMinCinquina: antiWinDifficultyConfig.forcedMin.cinquina,
+                    forcedMinTombola: antiWinDifficultyConfig.forcedMin.tombola,
+                    delayMaxGold: prizeDelaysConfig.gold.max,
+                    delayMaxAmbo: prizeDelaysConfig.ambo.max,
+                    delayMaxTerno: prizeDelaysConfig.terno.max,
+                    delayMaxQuaterna: prizeDelaysConfig.quaterna.max,
+                    delayMaxCinquina: prizeDelaysConfig.cinquina.max,
+                    delayMaxTombola: prizeDelaysConfig.tombola.max,
+                };
+
+                const origHtml = saveProfileBtn.innerHTML;
+                saveProfileBtn.disabled = true;
+                saveProfileBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Salvataggio...';
+
+                try {
+                    if (window.JackpotService) {
+                        const res = await window.JackpotService.saveRegiaProfile(payload);
+                        const savedProf = res.profile;
+                        const idx = regiaProfilesCache.findIndex(p => p.id === savedProf.id);
+                        if (idx >= 0) regiaProfilesCache[idx] = savedProf;
+                        else regiaProfilesCache.push(savedProf);
+
+                        populateRegiaProfileSelect(regiaProfilesCache, savedProf.id);
+                        applyRegiaProfileToEngine(savedProf);
+                        updateProfileCloudStatusBadge(res.savedToCloud);
+
+                        if (res.savedToCloud) {
+                            logRegiaEvent(`Profilo "${savedProf.name}" salvato e sincronizzato nel database Firestore.`, 'win');
+                            showSuccessPopup(`Profilo "${savedProf.name}" salvato nel Database Cloud!`);
+                        } else {
+                            logRegiaEvent(`Profilo "${savedProf.name}" salvato in cache locale (Cloud non disponibile).`, 'warn');
+                            showSuccessPopup(`Profilo "${savedProf.name}" salvato in locale (Database Cloud offline).`);
+                        }
+                    } else {
+                        showSuccessPopup('Servizio Database non disponibile.');
+                    }
+                } catch (err) {
+                    console.error('Errore salvataggio profilo:', err);
+                    logRegiaEvent('Errore durante il salvataggio del profilo nel database.', 'warn');
+                } finally {
+                    saveProfileBtn.disabled = false;
+                    saveProfileBtn.innerHTML = origHtml;
+                }
+            });
+        }
+
+        const deleteProfileBtn = document.getElementById('regiaDeleteProfileBtn');
+        if (deleteProfileBtn) {
+            deleteProfileBtn.addEventListener('click', function() {
+                const targetProf = regiaProfilesCache.find(p => p.id === activeRegiaProfileId);
+                if (!targetProf || targetProf.isPreset) {
+                    showSuccessPopup('I profili predefiniti non possono essere eliminati.');
+                    return;
+                }
+
+                showConfirmDialog(
+                    'Elimina Profilo Database',
+                    `Vuoi eliminare definitivamente il profilo <strong>${targetProf.name}</strong> dal database Firestore?`,
+                    async function() {
+                        if (window.JackpotService) {
+                            await window.JackpotService.deleteRegiaProfile(targetProf.id);
+                        }
+                        regiaProfilesCache = regiaProfilesCache.filter(p => p.id !== targetProf.id);
+                        const fallback = regiaProfilesCache.find(p => p.id === 'high') || regiaProfilesCache[0];
+                        if (fallback) {
+                            populateRegiaProfileSelect(regiaProfilesCache, fallback.id);
+                            applyRegiaProfileToEngine(fallback);
+                            if (window.JackpotService) {
+                                await window.JackpotService.setActiveRegiaProfileId(fallback.id);
+                            }
+                        }
+                        logRegiaEvent(`Profilo "${targetProf.name}" eliminato dal database.`, 'warn');
+                        showSuccessPopup(`Profilo "${targetProf.name}" eliminato.`);
+                    }
+                );
+            });
+        }
 
         const delayBtn = document.getElementById('regiaApplyDelaysBtn');
         if (delayBtn) {
             delayBtn.addEventListener('click', function() {
-                saveDelaysFromInputs();
-                logRegiaEvent(`Soglie scadenza premi applicate: Gold (${prizeDelaysConfig.gold.max}), Ambo (${prizeDelaysConfig.ambo.max}), Terno (${prizeDelaysConfig.terno.max}), Quat (${prizeDelaysConfig.quaterna.max}), Cinq (${prizeDelaysConfig.cinquina.max}), Tomb (${prizeDelaysConfig.tombola.max}).`, 'info');
+                readAllEngineInputsIntoConfig();
+                logRegiaEvent(`Soglie applicate alla partita: Min Ambo (${antiWinDifficultyConfig.forcedMin.ambo}) / Max Gold (${prizeDelaysConfig.gold.max}), Tomb Min (${antiWinDifficultyConfig.forcedMin.tombola}) / Max (${prizeDelaysConfig.tombola.max}).`, 'info');
                 syncRegiaUI();
-                showSuccessPopup(currentLanguage === 'it' ? "Soglie scadenza premi salvate e attive!" : "Prize expiration thresholds saved!");
+                showSuccessPopup(currentLanguage === 'it' ? "Soglie e parametri applicati alla partita corrente!" : "Thresholds applied to current game!");
             });
         }
 
         const resetDelaysBtn = document.getElementById('regiaResetDelaysBtn');
         if (resetDelaysBtn) {
             resetDelaysBtn.addEventListener('click', function() {
-                prizeDelaysConfig.gold.max = 25;
-                prizeDelaysConfig.ambo.max = 20;
-                prizeDelaysConfig.terno.max = 35;
-                prizeDelaysConfig.quaterna.max = 50;
-                prizeDelaysConfig.cinquina.max = 65;
-                prizeDelaysConfig.tombola.max = 85;
-                logRegiaEvent('Soglie scadenza premi ripristinate ai valori predefiniti.', 'info');
+                const defaultHigh = {
+                    enabled: true,
+                    level: 'high',
+                    forcedMin: { ambo: 15, terno: 28, quaterna: 42, cinquina: 58, tombola: 75 },
+                    delayMax: { gold: 25, ambo: 20, terno: 35, quaterna: 50, cinquina: 65, tombola: 85 }
+                };
+                antiWinDifficultyConfig.enabled = defaultHigh.enabled;
+                antiWinDifficultyConfig.level = defaultHigh.level;
+                Object.assign(antiWinDifficultyConfig.forcedMin, defaultHigh.forcedMin);
+                prizeDelaysConfig.gold.max = defaultHigh.delayMax.gold;
+                prizeDelaysConfig.ambo.max = defaultHigh.delayMax.ambo;
+                prizeDelaysConfig.terno.max = defaultHigh.delayMax.terno;
+                prizeDelaysConfig.quaterna.max = defaultHigh.delayMax.quaterna;
+                prizeDelaysConfig.cinquina.max = defaultHigh.delayMax.cinquina;
+                prizeDelaysConfig.tombola.max = defaultHigh.delayMax.tombola;
+                logRegiaEvent('Soglie Min/Max ripristinate ai valori predefiniti.', 'info');
                 syncRegiaUI();
             });
         }
@@ -4408,14 +4727,13 @@ function startTombolaApp() {
                 inp.addEventListener('change', function() {
                     const key = k.toLowerCase();
                     if (prizeDelaysConfig[key]) {
-                        prizeDelaysConfig[key].max = parseInt(this.value) || prizeDelaysConfig[key].max;
+                        prizeDelaysConfig[key].max = Math.min(90, Math.max(5, parseInt(this.value, 10) || prizeDelaysConfig[key].max));
                         syncRegiaUI();
                     }
                 });
             }
         });
 
-        // Event listeners per Box B: Algoritmo Difficoltà Vincite (Anti-Vincita)
         const diffMasterToggle = document.getElementById('regiaDifficultyMasterToggle');
         if (diffMasterToggle) {
             diffMasterToggle.addEventListener('change', function() {
@@ -4428,8 +4746,19 @@ function startTombolaApp() {
         const diffLevelSelect = document.getElementById('regiaDifficultyLevelSelect');
         if (diffLevelSelect) {
             diffLevelSelect.addEventListener('change', function() {
-                antiWinDifficultyConfig.level = this.value;
-                logRegiaEvent(`Profilo Difficoltà impostato su: ${this.value.toUpperCase()}.`, 'info');
+                const newLvl = this.value;
+                antiWinDifficultyConfig.level = newLvl;
+                const presetDefaults = {
+                    high: { enabled: true, forcedMin: { ambo: 15, terno: 28, quaterna: 42, cinquina: 58, tombola: 75 } },
+                    medium: { enabled: true, forcedMin: { ambo: 10, terno: 20, quaterna: 34, cinquina: 48, tombola: 65 } },
+                    normal: { enabled: true, forcedMin: { ambo: 6, terno: 14, quaterna: 24, cinquina: 36, tombola: 55 } },
+                    random: { enabled: false, forcedMin: { ambo: 2, terno: 3, quaterna: 4, cinquina: 5, tombola: 15 } },
+                };
+                if (presetDefaults[newLvl]) {
+                    antiWinDifficultyConfig.enabled = presetDefaults[newLvl].enabled;
+                    Object.assign(antiWinDifficultyConfig.forcedMin, presetDefaults[newLvl].forcedMin);
+                }
+                logRegiaEvent(`Strategia Algoritmo impostata su: ${newLvl.toUpperCase()}.`, 'info');
                 syncRegiaUI();
             });
         }
@@ -4438,8 +4767,8 @@ function startTombolaApp() {
             const el = document.getElementById(id);
             if (el) {
                 el.addEventListener('change', function() {
-                    const v = parseInt(this.value);
-                    if (!isNaN(v) && v > 0) {
+                    const v = parseInt(this.value, 10);
+                    if (!isNaN(v) && v >= 1 && v <= 90) {
                         antiWinDifficultyConfig.forcedMin[key] = v;
                         logRegiaEvent(`Ritardo minimo forzato per ${key.toUpperCase()}: ${v} estrazioni.`, 'info');
                         syncRegiaUI();

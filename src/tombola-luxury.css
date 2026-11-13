@@ -3952,25 +3952,21 @@ nav > .box-id-badge {
 }
 
 /* RIGA 1: TUTTI I 4 BOX IN LINEA ORIZZONTALE (Banco, Montepremi, Colori, Algoritmo Anti-Vincita)
-   Ciascun box occupa 3 colonne su 12 = 25% di larghezza ciascuno, perfettamente affiancati */
+/* RIGA 1: BANCO ESTRAZIONE (4) + GESTIONE MONTEPREMI (4) + COLORI CARTELLE (4) = 12 colonne */
 .regia-extraction-card {
-  grid-column: span 3 !important;
+  grid-column: span 4 !important;
 }
 
 .regia-prizes-card {
-  grid-column: span 3 !important;
+  grid-column: span 4 !important;
 }
 
 .regia-colors-card {
-  grid-column: span 3 !important;
+  grid-column: span 4 !important;
 }
 
-.regia-difficulty-card {
-  grid-column: span 3 !important;
-}
-
-/* RIGA 2: SCADENZE (span 4), TABELLONE 90 (span 4), GRAFICHE TV (span 4) = 12 colonne totali */
-.regia-delays-card {
+/* RIGA 2: BOX UNIFICATO DIFFICOLTÀ & SOGLIE PROFILI DB (4), TABELLONE 90 (4), GRAFICHE TV (4) = 12 colonne */
+.regia-unified-engine-card {
   grid-column: span 4 !important;
 }
 
@@ -3992,11 +3988,9 @@ nav > .box-id-badge {
   .regia-extraction-card,
   .regia-prizes-card,
   .regia-colors-card,
-  .regia-difficulty-card {
-    grid-column: span 6 !important;
-  }
-  .regia-delays-card,
+  .regia-unified-engine-card,
   .regia-board-card,
+  .regia-graphics-card,
   .regia-wins-card {
     grid-column: span 6 !important;
   }
@@ -4009,9 +4003,9 @@ nav > .box-id-badge {
   .regia-extraction-card,
   .regia-prizes-card,
   .regia-colors-card,
-  .regia-difficulty-card,
-  .regia-delays-card,
+  .regia-unified-engine-card,
   .regia-board-card,
+  .regia-graphics-card,
   .regia-wins-card,
   .regia-log-card {
     grid-column: span 12 !important;
@@ -5536,11 +5530,137 @@ body:not(.dark-mode) .tv-rollover-badge {
 .regia-delay-actions {
   display: flex;
   gap: 6px;
+  margin-bottom: 8px;
 }
 
 /* ========================================================
-   REGIA: ALGORITMO DIFFICOLTÀ VINCITE (ANTI-VINCITA BOX B)
+   REGIA: BOX UNIFICATO DIFFICOLTÀ, SOGLIE & PROFILI DB
    ======================================================== */
+.regia-header-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.regia-unified-engine-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.regia-profile-db-box {
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 6px;
+  padding: 7px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.regia-profile-db-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.regia-profile-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.regia-profile-field label {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #cbd5e1;
+  text-transform: uppercase;
+}
+
+.regia-profile-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.regia-profile-name-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 7px;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(212, 175, 55, 0.4);
+  border-radius: 4px;
+  color: #f8fafc;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.regia-btn-sm.cloud-save-btn {
+  background: linear-gradient(135deg, #0ea5e9, #0284c7);
+  border-color: rgba(56, 189, 248, 0.7);
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.regia-unified-table-header {
+  display: grid;
+  grid-template-columns: 1.35fr 0.78fr 0.78fr 1.25fr;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: #94a3b8;
+  letter-spacing: 0.4px;
+}
+
+.regia-delay-rows.unified-rows {
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.regia-delay-row.unified-row {
+  display: grid;
+  grid-template-columns: 1.35fr 0.78fr 0.78fr 1.25fr;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+}
+
+.regia-delay-row.unified-row.unified-row-tombola {
+  background: rgba(234, 179, 8, 0.1);
+  border-color: rgba(250, 204, 21, 0.4);
+}
+
+.unified-na-cell {
+  text-align: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: #94a3b8;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+  padding: 2px 4px;
+}
+
+.unified-input-cell {
+  display: flex;
+  justify-content: center;
+}
+
+.unified-status-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  min-width: 0;
+}
+
+.unified-status-cell .delay-progress {
+  margin-left: 0;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
 .regia-difficulty-toggle-row {
   display: flex;
   justify-content: space-between;
@@ -5549,7 +5669,6 @@ body:not(.dark-mode) .tv-rollover-badge {
   background: rgba(0, 0, 0, 0.25);
   border: 1px solid rgba(212, 175, 55, 0.25);
   border-radius: 5px;
-  margin-bottom: 8px;
   font-size: 11px;
   color: #f8fafc;
 }
@@ -5561,85 +5680,17 @@ body:not(.dark-mode) .tv-rollover-badge {
   line-height: 1.3;
 }
 
-.regia-difficulty-mode-row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 8px;
-}
-
-.regia-difficulty-mode-row label {
-  font-size: 10px;
-  font-weight: 700;
-  color: #cbd5e1;
-  text-transform: uppercase;
-}
-
-.regia-forced-delays-box {
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(212, 175, 55, 0.2);
-  border-radius: 5px;
-  padding: 7px 8px;
-  margin-bottom: 8px;
-}
-
-.regia-forced-title {
-  font-size: 10px;
-  font-weight: 800;
-  color: #facc15;
-  margin-bottom: 6px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.forced-delay-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 6px;
-}
-
-.forced-delay-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 9.5px;
-  color: #94a3b8;
-  background: rgba(255, 255, 255, 0.04);
-  padding: 3px 5px;
-  border-radius: 4px;
-}
-
-.forced-delay-item span {
-  font-weight: 700;
-  color: #e2e8f0;
-}
-
 .regia-micro-input {
-  width: 38px;
-  padding: 1px 3px;
+  width: 44px;
+  padding: 2px 4px;
   background: rgba(15, 23, 42, 0.95);
-  border: 1px solid rgba(212, 175, 55, 0.4);
+  border: 1px solid rgba(56, 189, 248, 0.45);
   border-radius: 3px;
   color: #38bdf8;
   font-weight: 800;
-  font-size: 10px;
+  font-size: 11px;
   text-align: center;
 }
-
-/* Regia: Min Tombola in Forced Delay Grid */
-.forced-delay-item.forced-delay-tombola {
-  grid-column: span 2;
-  justify-content: center;
-  background: rgba(234, 179, 8, 0.12);
-  border: 1px solid rgba(250, 204, 21, 0.35);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
-}
-
-.forced-delay-item.forced-delay-tombola span {
-  color: #facc15;
-}
-
 
 .regia-algo-monitor {
   display: flex;

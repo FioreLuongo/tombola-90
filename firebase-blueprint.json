@@ -66,6 +66,91 @@
         }
       },
       "required": ["id", "timestamp", "type", "amount", "balanceAfter"]
+    },
+    "RegiaProfile": {
+      "title": "RegiaProfile",
+      "description": "Saved difficulty and prize expiration threshold profile for Regia game control.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique profile identifier."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Human-readable profile name."
+        },
+        "isPreset": {
+          "type": "boolean",
+          "description": "Whether this profile is one of the built-in presets."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether mathematical anti-win control is enabled."
+        },
+        "difficultyLevel": {
+          "type": "string",
+          "enum": ["high", "medium", "normal", "random", "custom"],
+          "description": "Difficulty algorithm strategy."
+        },
+        "forcedMinAmbo": { "type": "number" },
+        "forcedMinTerno": { "type": "number" },
+        "forcedMinQuaterna": { "type": "number" },
+        "forcedMinCinquina": { "type": "number" },
+        "forcedMinTombola": { "type": "number" },
+        "delayMaxGold": { "type": "number" },
+        "delayMaxAmbo": { "type": "number" },
+        "delayMaxTerno": { "type": "number" },
+        "delayMaxQuaterna": { "type": "number" },
+        "delayMaxCinquina": { "type": "number" },
+        "delayMaxTombola": { "type": "number" },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 40,
+          "description": "ISO timestamp of last save."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "enabled",
+        "difficultyLevel",
+        "forcedMinAmbo",
+        "forcedMinTerno",
+        "forcedMinQuaterna",
+        "forcedMinCinquina",
+        "forcedMinTombola",
+        "delayMaxGold",
+        "delayMaxAmbo",
+        "delayMaxTerno",
+        "delayMaxQuaterna",
+        "delayMaxCinquina",
+        "delayMaxTombola",
+        "updatedAt"
+      ]
+    },
+    "ActiveRegiaSettings": {
+      "title": "ActiveRegiaSettings",
+      "description": "Pointer and snapshot of the currently active Regia difficulty & threshold profile.",
+      "type": "object",
+      "properties": {
+        "activeProfileId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 40
+        }
+      },
+      "required": ["activeProfileId", "updatedAt"]
     }
   },
   "firestore": {
@@ -76,6 +161,14 @@
     "/unclaimed_history/{historyId}": {
       "schema": "UnclaimedHistory",
       "description": "Detailed history of unclaimed prize rollover transactions."
+    },
+    "/regia_profiles/{profileId}": {
+      "schema": "RegiaProfile",
+      "description": "Saved difficulty and prize threshold profiles managed manually in Regia."
+    },
+    "/regia_settings/{settingId}": {
+      "schema": "ActiveRegiaSettings",
+      "description": "Active Regia configuration pointing to the selected profile."
     }
   }
 }

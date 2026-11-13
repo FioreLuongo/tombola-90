@@ -70,8 +70,23 @@ const defaultGameState: ServerGameState = {
 
 let currentGameState: ServerGameState = { ...defaultGameState };
 
-// Initialize WebSocket Server
-const wss = new WebSocketServer({ server, path: '/ws' });
+// Initialize WebSocket Server safely via noServer to avoid conflicting with other upgrade paths
+const wss = new WebSocketServer({ noServer: true });
+
+server.on('upgrade', (request, socket, head) => {
+  try {
+    const reqUrl = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`);
+    if (reqUrl.pathname === '/ws') {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
+    } else {
+      socket.destroy();
+    }
+  } catch {
+    socket.destroy();
+  }
+});
 
 function broadcast(message: object, excludeSender?: WebSocket) {
   const payload = JSON.stringify(message);
@@ -301,7 +316,7 @@ async function startServer() {
   if (!isProduction) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa',
     });
     app.use(vite.middlewares);

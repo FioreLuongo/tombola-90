@@ -2,6 +2,57 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 64 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidThreshold(n, minVal, maxVal) {
+      return (n is int || n is float) && n >= minVal && n <= maxVal;
+    }
+
+    function isValidRegiaProfile(data) {
+      return data.keys().hasAll([
+               'id', 'name', 'enabled', 'difficultyLevel',
+               'forcedMinAmbo', 'forcedMinTerno', 'forcedMinQuaterna', 'forcedMinCinquina', 'forcedMinTombola',
+               'delayMaxGold', 'delayMaxAmbo', 'delayMaxTerno', 'delayMaxQuaterna', 'delayMaxCinquina', 'delayMaxTombola',
+               'updatedAt'
+             ])
+             && data.keys().hasOnly([
+               'id', 'name', 'isPreset', 'enabled', 'difficultyLevel',
+               'forcedMinAmbo', 'forcedMinTerno', 'forcedMinQuaterna', 'forcedMinCinquina', 'forcedMinTombola',
+               'delayMaxGold', 'delayMaxAmbo', 'delayMaxTerno', 'delayMaxQuaterna', 'delayMaxCinquina', 'delayMaxTombola',
+               'updatedAt'
+             ])
+             && isValidId(data.id)
+             && data.name is string && data.name.size() >= 1 && data.name.size() <= 60
+             && (!('isPreset' in data) || data.isPreset is bool)
+             && data.enabled is bool
+             && data.difficultyLevel in ['high', 'medium', 'normal', 'random', 'custom']
+             && isValidThreshold(data.forcedMinAmbo, 1, 90)
+             && isValidThreshold(data.forcedMinTerno, 1, 90)
+             && isValidThreshold(data.forcedMinQuaterna, 1, 90)
+             && isValidThreshold(data.forcedMinCinquina, 1, 90)
+             && isValidThreshold(data.forcedMinTombola, 1, 90)
+             && isValidThreshold(data.delayMaxGold, 5, 90)
+             && isValidThreshold(data.delayMaxAmbo, 5, 90)
+             && isValidThreshold(data.delayMaxTerno, 5, 90)
+             && isValidThreshold(data.delayMaxQuaterna, 5, 90)
+             && isValidThreshold(data.delayMaxCinquina, 5, 90)
+             && isValidThreshold(data.delayMaxTombola, 5, 90)
+             && data.updatedAt is string && data.updatedAt.size() >= 10 && data.updatedAt.size() <= 40;
+    }
+
+    function isValidActiveRegiaSettings(data) {
+      return data.keys().hasAll(['activeProfileId', 'updatedAt'])
+             && data.keys().hasOnly(['activeProfileId', 'updatedAt'])
+             && isValidId(data.activeProfileId)
+             && data.updatedAt is string && data.updatedAt.size() >= 10 && data.updatedAt.size() <= 40;
+    }
+
     // Test connection document
     match /test/connection {
       allow read, write: if true;
@@ -9,19 +60,38 @@ service cloud.firestore {
 
     // Cumulative jackpot bank for rollover prizes
     match /jackpot_bank/{bankId} {
-      allow read: if true;
-      allow write: if request.resource.data.accumulatedUnclaimed is number
+      allow read: if isValidId(bankId);
+      allow write: if isValidId(bankId)
+                   && request.resource.data.accumulatedUnclaimed is number
                    && request.resource.data.accumulatedUnclaimed >= 0
-                   && request.resource.data.currency is string;
+                   && request.resource.data.currency is string
+                   && request.resource.data.currency.size() <= 8;
     }
 
     // Ledger of prize deposits, recalls, and game sessions
     match /unclaimed_history/{historyId} {
       allow read: if true;
-      allow create: if request.resource.data.amount is number
+      allow create: if isValidId(historyId)
+                    && request.resource.data.amount is number
                     && request.resource.data.balanceAfter is number
                     && request.resource.data.type in ['deposit_expired', 'recalled_into_game', 'manual_adjustment', 'reset'];
-      allow update, delete: if true;
+      allow update, delete: if false;
+    }
+
+    // Saved Regia difficulty & prize threshold profiles
+    match /regia_profiles/{profileId} {
+      allow read: if true;
+      allow create, update: if isValidId(profileId)
+                            && isValidRegiaProfile(request.resource.data)
+                            && request.resource.data.id == profileId;
+      allow delete: if isValidId(profileId);
+    }
+
+    // Active Regia profile pointer
+    match /regia_settings/{settingId} {
+      allow read: if isValidId(settingId);
+      allow create, update: if isValidId(settingId) && isValidActiveRegiaSettings(request.resource.data);
+      allow delete: if false;
     }
   }
 }
