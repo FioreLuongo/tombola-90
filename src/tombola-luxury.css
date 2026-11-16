@@ -8432,3 +8432,113 @@ body.tv-studio-active a:focus-visible {
   outline: 3px solid #facc15 !important;
   outline-offset: 2px;
 }
+
+/* ==========================================================================
+   MODALITÀ KIOSK TV (FULLSCREEN 4K / 1080p SENZA BARRE DI SCORRIMENTO)
+   ========================================================================== */
+html.tv-kiosk-html,
+html:fullscreen,
+html:-webkit-full-screen {
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+html.tv-kiosk-html::-webkit-scrollbar,
+body.tv-kiosk-mode::-webkit-scrollbar,
+body.tv-kiosk-mode *::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+body.tv-kiosk-mode:not(.tv-scaled) {
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 10px 16px !important;
+  overflow: hidden !important;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+body.tv-kiosk-mode.tv-res-1080p .custom-title-box,
+body.tv-kiosk-mode.tv-res-4k .custom-title-box {
+  width: clamp(440px, 34vw, 660px);
+  height: clamp(54px, 5.6vh, 70px);
+  font-size: clamp(1.1rem, 1.3vw, 1.48rem);
+}
+
+body.tv-kiosk-mode.tv-res-1080p .clock,
+body.tv-kiosk-mode.tv-res-4k .clock {
+  height: clamp(54px, 5.6vh, 70px);
+  padding: 6px 18px;
+}
+
+body.tv-kiosk-mode.tv-res-1080p .clock-value,
+body.tv-kiosk-mode.tv-res-4k .clock-value {
+  font-size: clamp(1.6rem, 2.9vh, 2.15rem);
+}
+
+body.tv-kiosk-mode.tv-res-1080p .number,
+body.tv-kiosk-mode.tv-res-4k .number {
+  font-size: clamp(1.1rem, 2.4vh, 1.75rem);
+}
+
+body.tv-kiosk-mode.tv-res-1080p #board .number.extracted:not(.flip-circle),
+body.tv-kiosk-mode.tv-res-4k #board .number.extracted:not(.flip-circle),
+body.tv-kiosk-mode.tv-res-1080p #board .number.flip-circle:not(.flipping-to-green-phase2),
+body.tv-kiosk-mode.tv-res-4k #board .number.flip-circle:not(.flipping-to-green-phase2) {
+  font-size: clamp(1.15rem, 2.45vh, 1.82rem) !important;
+}
+
+body.tv-kiosk-mode.tv-res-1080p .right-column,
+body.tv-kiosk-mode.tv-res-4k .right-column {
+  width: clamp(260px, 16.5vw, 320px);
+}
+
+body.tv-kiosk-mode.tv-res-1080p .card-last-numbers,
+body.tv-kiosk-mode.tv-res-4k .card-last-numbers,
+body.tv-kiosk-mode.tv-res-1080p .countdown-container,
+body.tv-kiosk-mode.tv-res-4k .countdown-container {
+  width: clamp(96px, 6.8vw, 128px);
+}
+
+body.tv-kiosk-mode.tv-res-1080p .last-number-vertical,
+body.tv-kiosk-mode.tv-res-4k .last-number-vertical {
+  width: clamp(32px, 4.1vh, 46px);
+  height: clamp(32px, 4.1vh, 46px);
+  font-size: clamp(13px, 1.8vh, 17px);
+}
+
+body.tv-kiosk-mode.tv-res-1080p .current-number,
+body.tv-kiosk-mode.tv-res-4k .current-number {
+  width: clamp(208px, 24vh, 260px) !important;
+  height: clamp(208px, 24vh, 260px) !important;
+  max-width: 260px !important;
+  max-height: 260px !important;
+  font-size: clamp(104px, 11.8vh, 130px) !important;
+}
+
+body.tv-kiosk-mode.tv-res-1080p .card h2,
+body.tv-kiosk-mode.tv-res-4k .card h2,
+body.tv-kiosk-mode.tv-res-1080p .montepremi-header h2,
+body.tv-kiosk-mode.tv-res-4k .montepremi-header h2,
+body.tv-kiosk-mode.tv-res-1080p .vincite-header-large h2,
+body.tv-kiosk-mode.tv-res-4k .vincite-header-large h2 {
+  font-size: clamp(0.8rem, 1.2vh, 0.98rem);
+}
+
+body.tv-kiosk-mode.tv-res-1080p .countdown-header h2,
+body.tv-kiosk-mode.tv-res-4k .countdown-header h2 {
+  font-size: clamp(0.66rem, 1.02vh, 0.78rem);
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+

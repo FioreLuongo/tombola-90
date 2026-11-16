@@ -27,7 +27,8 @@ import {
 import {
     computeBoardFallbackWidth,
     computeTvStageLayout,
-    exitVendorFullscreen,
+    enterKioskMode as enterTvKioskMode,
+    exitKioskMode as exitTvKioskMode,
     getFullscreenElement,
     isSmartTvUserAgent,
     requestVendorFullscreen,
@@ -3958,6 +3959,58 @@ function startTombolaApp() {
         }
     }
 
+    let kioskGestureFallbackArmed = false;
+
+    function armKioskFullscreenGestureFallback() {
+        if (kioskGestureFallbackArmed || getFullscreenElement(document)) return;
+        kioskGestureFallbackArmed = true;
+        const events = ['pointerdown', 'keydown', 'click', 'touchstart'];
+        const retryFullscreen = async () => {
+            events.forEach((evt) => document.removeEventListener(evt, retryFullscreen, true));
+            kioskGestureFallbackArmed = false;
+            if (!tvStudioActive && !isSmartTvUserAgent(navigator.userAgent || '')) return;
+            if (!getFullscreenElement(document)) {
+                await requestVendorFullscreen(document.documentElement);
+                syncTvButtonVisualState();
+                applyTvResponsiveLayout();
+            }
+        };
+        events.forEach((evt) => document.addEventListener(evt, retryFullscreen, { capture: true, passive: true }));
+    }
+
+    async function enterKioskMode(options = {}) {
+        tvStudioActive = true;
+
+        // Forza sempre il tema scuro broadcast in modalità Kiosk / TV
+        if (!document.body.classList.contains('dark-mode')) {
+            applyThemeMode(true, false);
+        }
+
+        const result = await enterTvKioskMode({
+            doc: document,
+            win: window,
+            userAgent: navigator.userAgent || '',
+            ...options,
+        });
+
+        // Se il browser blocca requestFullscreen() all'avvio senza gesto utente, ritenta automaticamente al primo tasto/click
+        if (!result.fullscreenEntered && options.requestFullscreen !== false) {
+            armKioskFullscreenGestureFallback();
+        }
+
+        try {
+            if (navigator.wakeLock && typeof navigator.wakeLock.request === 'function') {
+                tvWakeLockSentinel = await navigator.wakeLock.request('screen');
+            }
+        } catch {
+            // WakeLock non supportato o bloccato dal browser TV
+        }
+
+        syncTvButtonVisualState();
+        applyTvResponsiveLayout();
+        return result;
+    }
+
     function applyTvResponsiveLayout() {
         const vw = window.innerWidth || document.documentElement.clientWidth || 1360;
         const vh = window.innerHeight || document.documentElement.clientHeight || 760;
@@ -3965,7 +4018,11 @@ function startTombolaApp() {
         const isTvDevice = isSmartTvUserAgent(ua);
         const layout = computeTvStageLayout(vw, vh, tvStudioActive, ua);
 
-        document.body.classList.toggle('tv-device', Boolean(isTvDevice || tvStudioActive));
+        const tvActive = Boolean(isTvDevice || tvStudioActive);
+        document.body.classList.toggle('tv-device', tvActive);
+        document.body.classList.toggle('tv-res-4k', tvActive && layout.resolutionTier === '4k');
+        document.body.classList.toggle('tv-res-1080p', tvActive && (layout.resolutionTier === '1080p' || layout.resolutionTier === '4k'));
+        document.body.classList.toggle('tv-res-hd', tvActive && layout.resolutionTier === 'hd');
 
         if (layout.shouldScale) {
             document.body.classList.add('tv-scaled');
@@ -4017,25 +4074,12 @@ function startTombolaApp() {
     async function toggleTvStudioMode(forceActive) {
         const nextActive = typeof forceActive === 'boolean' ? forceActive : !(tvStudioActive || Boolean(getFullscreenElement(document)));
         tvStudioActive = nextActive;
-        document.body.classList.toggle('tv-studio-active', tvStudioActive);
 
         if (tvStudioActive) {
-            // In Modalità TV forziamo il tema scuro ad alto contrasto (senza sovrascrivere la preferenza desktop se non cambiata dall'utente)
-            if (!document.body.classList.contains('dark-mode')) {
-                applyThemeMode(true, false);
-            }
-            await requestVendorFullscreen(document.documentElement);
-            try {
-                if (navigator.wakeLock && typeof navigator.wakeLock.request === 'function') {
-                    tvWakeLockSentinel = await navigator.wakeLock.request('screen');
-                }
-            } catch {
-                // WakeLock non supportato o bloccato dal browser TV
-            }
+            await enterKioskMode({ reason: 'manual_tv_toggle' });
         } else {
-            if (getFullscreenElement(document)) {
-                await exitVendorFullscreen(document);
-            }
+            document.body.classList.remove('tv-studio-active');
+            await exitTvKioskMode(document);
             try {
                 if (tvWakeLockSentinel && typeof tvWakeLockSentinel.release === 'function') {
                     await tvWakeLockSentinel.release();
@@ -4044,10 +4088,9 @@ function startTombolaApp() {
             } catch {
                 // Ignora errore rilascio WakeLock
             }
+            syncTvButtonVisualState();
+            applyTvResponsiveLayout();
         }
-
-        syncTvButtonVisualState();
-        applyTvResponsiveLayout();
     }
 
     function initThemeAndTvDisplay() {
@@ -4065,13 +4108,12 @@ function startTombolaApp() {
         const useDark = isSmartTv || autoTv ? true : savedTheme !== 'light';
         applyThemeMode(useDark, false);
 
-        if (autoTv) {
-            tvStudioActive = true;
-            document.body.classList.add('tv-studio-active');
+        if (isSmartTv || autoTv) {
+            void enterKioskMode({ reason: isSmartTv ? 'tv_startup' : 'url_param' });
+        } else {
+            applyTvResponsiveLayout();
+            syncTvButtonVisualState();
         }
-
-        applyTvResponsiveLayout();
-        syncTvButtonVisualState();
 
         window.addEventListener('resize', applyTvResponsiveLayout);
         window.addEventListener('orientationchange', applyTvResponsiveLayout);
@@ -5833,20 +5875,18 @@ function startTombolaApp() {
             });
         }
 
-        // Se l'URL contiene ?view=tv, apri direttamente lo Schermo TV Studio senza Regia attiva
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('view') === 'tv' || urlParams.get('mode') === 'tv' || urlParams.get('tv') === '1') {
+        // Se l'URL contiene ?view=tv / ?kiosk=1, chiudi Regia e registra l'avvio Kiosk TV
+        if (shouldAutoEnableTvMode(window.location.search, navigator.userAgent || '')) {
             closeRegia();
-            tvStudioActive = true;
-            document.body.classList.add('tv-studio-active');
-            applyThemeMode(true, false);
-            applyTvResponsiveLayout();
-            syncTvButtonVisualState();
-            logRegiaEvent('Modalità Schermo TV Studio attiva.', 'info');
+            if (!document.body.classList.contains('tv-kiosk-mode')) {
+                void enterKioskMode({ reason: 'url_param' });
+            }
+            logRegiaEvent('Modalità Kiosk / Schermo TV Studio attiva.', 'info');
         }
     }
 
-    // Expose testable handle for automated inspection & verification
+    // Expose testable handle & global enterKioskMode helper
+    window.enterKioskMode = enterKioskMode;
     window.__tombolaGame = {
         getSequentialActivePrize,
         getCartelleWins: () => cartelleWins,
@@ -5873,6 +5913,7 @@ function startTombolaApp() {
         applyTvGraphicState,
         applyTvResponsiveLayout,
         toggleTvStudioMode,
+        enterKioskMode,
         applyThemeMode,
         setupRealtimeWebSocketSync
     };
