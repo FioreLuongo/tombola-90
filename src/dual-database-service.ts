@@ -314,7 +314,7 @@ export async function getDualJackpotBankAndHistory(limitCount: number = 8): Prom
 
 export async function saveDualCurrentGameUnclaimed(
   currentGameUnclaimed: number,
-  currency: string = '€'
+  currency: string = '£'
 ): Promise<{ success: boolean; bank: JackpotBankData; savedToCloud: boolean }> {
   const mode = resolveDatabaseMode();
   const safeCurrent =
@@ -362,7 +362,7 @@ export async function saveDualCurrentGameUnclaimed(
 
 export async function depositDualUnclaimed(
   amount: number,
-  currency: string = '€',
+  currency: string = '£',
   prizeCategory: string = 'all',
   gameId: string = 'TOM001',
   note: string = 'Deposito montepremi non vinti'

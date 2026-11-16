@@ -299,10 +299,10 @@ const ALLOWED_CURRENCIES = new Set(['€', '£', '$']);
 
 function sanitizeCurrency(rawCurrency: unknown): string {
   const trimmed = typeof rawCurrency === 'string' ? rawCurrency.trim() : '';
-  return ALLOWED_CURRENCIES.has(trimmed) ? trimmed : '€';
+  return ALLOWED_CURRENCIES.has(trimmed) ? trimmed : '£';
 }
 
-export function buildEmptyJackpotBank(currency: string = '€'): JackpotBankData {
+export function buildEmptyJackpotBank(currency: string = '£'): JackpotBankData {
   return {
     accumulatedUnclaimed: 0,
     currentGameUnclaimed: 0,
@@ -409,7 +409,7 @@ export function subscribeToJackpotBank(callback: (bank: JackpotBankData) => void
 
 export async function saveCurrentGameUnclaimedToFirestore(
   currentGameUnclaimed: number,
-  currency: string = '€'
+  currency: string = '£'
 ): Promise<{ success: boolean; bank: JackpotBankData; error?: string }> {
   const safeCurrent = Number.isFinite(currentGameUnclaimed) && currentGameUnclaimed >= 0
     ? Math.round(currentGameUnclaimed * 100) / 100
@@ -452,7 +452,7 @@ export async function saveCurrentGameUnclaimedToFirestore(
 
 export async function saveUnclaimedToDatabase(
   amount: number,
-  currency: string = '€',
+  currency: string = '£',
   prizeCategory: string = 'all',
   gameId: string = 'TOM001',
   note: string = 'Deposito montepremi non vinti'
@@ -932,7 +932,7 @@ export function buildDefaultRegiaGameConfig(): RegiaGameConfigDoc {
     },
     prizes: {
       prizePool: 0,
-      currency: '€',
+      currency: '£',
     },
     updatedAt: new Date().toISOString(),
   };

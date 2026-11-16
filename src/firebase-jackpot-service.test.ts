@@ -30,7 +30,7 @@ test('DEFAULT_REGIA_PROFILES includes all 4 base presets with valid thresholds',
 test('sanitizeRegiaGameConfig enforces bounds and buildRegiaGameConfigSignature ignores timestamps', () => {
   const defaults = buildDefaultRegiaGameConfig();
   assert.equal(defaults.id, 'main');
-  assert.equal(defaults.prizes.currency, '€');
+  assert.equal(defaults.prizes.currency, '£');
 
   const sanitizedA = sanitizeRegiaGameConfig({
     id: 'other',

@@ -26,6 +26,7 @@ const BROADCAST_TO_EVENT_ALIAS: Record<string, string> = {
   REGIA_RESET_GAME: 'GAME_RESET',
   UPDATE_UNCLAIMED: 'UNCLAIMED_UPDATED',
   UPDATE_PRIZE_POOL: 'PRIZE_POOL_UPDATED',
+  UPDATE_COLORS: 'COLORS_UPDATED',
   UPDATE_GRAPHICS: 'GRAPHICS_UPDATED',
   SYNC_FULL_STATE: 'FULL_STATE_SYNC',
 };
@@ -192,6 +193,14 @@ class TombolaRealtimeSyncService {
       type: 'UPDATE_PRIZE_POOL',
       prizePool,
       currency,
+      timestamp: Date.now()
+    });
+  }
+
+  public broadcastColorsUpdate(colors: Record<string, boolean>) {
+    this.send({
+      type: 'UPDATE_COLORS',
+      colors,
       timestamp: Date.now()
     });
   }

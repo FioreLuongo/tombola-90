@@ -24,6 +24,15 @@ import {
     saveTavoloActiveSheetsSelection,
     writeTavoloUiPrefs,
 } from './tavolo-cards-service';
+import {
+    computeBoardFallbackWidth,
+    computeTvStageLayout,
+    exitVendorFullscreen,
+    getFullscreenElement,
+    isSmartTvUserAgent,
+    requestVendorFullscreen,
+    shouldAutoEnableTvMode,
+} from './utils/tv-display';
 if (typeof window !== 'undefined' && !window.JackpotService) {
     window.JackpotService = jackpotServiceModule;
 }
@@ -54,6 +63,8 @@ function startTombolaApp() {
     let generatedCartelle =[];
     let isPausedForWin = false;
     let aiIntelligenceEnabled = true;
+    let tvStudioActive = false;
+    let tvWakeLockSentinel = null;
 
     // ===== STATO SEZIONE TAVOLO GIOCO & MENÙ GENERAZIONE CARTELLE =====
     let cartellePlayMode = 'menu'; // 'menu' | 'tavolo' | 'online'
@@ -137,7 +148,7 @@ function startTombolaApp() {
         const poolInput = document.getElementById('prizePool');
         const currSelect = document.getElementById('currencySelect');
         const nextPool = Number(prizes.prizePool) || 0;
-        const nextCurr = prizes.currency || '€';
+        const nextCurr = prizes.currency || '£';
         let changed = false;
 
         if (poolInput && (parseFloat(poolInput.value || '0') || 0) !== nextPool) {
@@ -218,6 +229,7 @@ function startTombolaApp() {
 
     let winningNumbersByCartella = {};
     let activeColorSheets = { blue: [], orange: [], green: [], yellow:[] };
+    let regiaColorEnabled = { blue: false, orange: false, green: false, yellow: false };
     let participatingGiocatori = 0;
 
     let gameStats = {
@@ -233,7 +245,7 @@ function startTombolaApp() {
             green: { cartelle: 0, active: 0, gold: 0, ambo: 0, terno: 0, quaterna: 0, cinquina: 0, tombola: 0, totalWins: 0 },
             yellow: { cartelle: 0, active: 0, gold: 0, ambo: 0, terno: 0, quaterna: 0, cinquina: 0, tombola: 0, totalWins: 0 }
         },
-        prizeStats: { totalPrize: 0, goldPrize: 0, amboPrize: 0, ternoPrize: 0, quaternaPrize: 0, cinquinaPrize: 0, tombolaPrize: 0, currency: "€" }
+        prizeStats: { totalPrize: 0, goldPrize: 0, amboPrize: 0, ternoPrize: 0, quaternaPrize: 0, cinquinaPrize: 0, tombolaPrize: 0, currency: "£" }
     };
 
     let allNumbers = Array.from({length: 90}, (_, i) => i + 1);
@@ -483,7 +495,7 @@ function startTombolaApp() {
 
     // ===== FUNZIONI PER IL NUOVO BOX MONTEPREMI NON VINTI (LIVE + ROLLOVER) =====
     function updateUnclaimedPotDisplay() {
-        const currency = document.getElementById('currencySelect')?.value || '€';
+        const currency = document.getElementById('currencySelect')?.value || '£';
         regiaStateManager.syncPrizesState({
             unclaimedCurrentGame: unclaimedGoldTotal,
             currency,
@@ -491,7 +503,7 @@ function startTombolaApp() {
     }
 
     function persistCurrentGameUnclaimedToDb() {
-        const currency = document.getElementById('currencySelect')?.value || '€';
+        const currency = document.getElementById('currencySelect')?.value || '£';
         void regiaStateManager.saveCurrentGameUnclaimedToCloud(unclaimedGoldTotal, currency);
     }
 
@@ -504,7 +516,7 @@ function startTombolaApp() {
 
         currentGameRolloverArchived = true;
         const amountToSave = Math.round(unclaimedGoldTotal * 100) / 100;
-        const currency = document.getElementById('currencySelect')?.value || '€';
+        const currency = document.getElementById('currencySelect')?.value || '£';
         const gameId = cartelleGameId || document.getElementById('gameId')?.value || DEFAULT_ONLINE_GAME_ID;
 
         unclaimedGoldTotal = 0;
@@ -562,7 +574,7 @@ function startTombolaApp() {
                 }
 
                 const gameId = cartelleGameId || document.getElementById('gameId')?.value || DEFAULT_ONLINE_GAME_ID;
-                const currency = bankState.currency || document.getElementById('currencySelect')?.value || '€';
+                const currency = bankState.currency || document.getElementById('currencySelect')?.value || '£';
                 rolloverRecalledThisGame = true;
 
                 const res = await regiaStateManager.recallUnclaimedFromFirestore(
@@ -650,7 +662,7 @@ function startTombolaApp() {
     function checkPrizeExpirations() {
         const count = extractedNumbers.length;
         const prizePool = parseFloat(document.getElementById('prizePool').value) || 0;
-        const currency = document.getElementById('currencySelect').value || '€';
+        const currency = document.getElementById('currencySelect').value || '£';
         let newExpired = false;
 
         // 1. Controllo Scadenza Numero Gold
@@ -789,7 +801,7 @@ function startTombolaApp() {
         // Se non ci sono vincite per la tombola, il premio NON deve essere ridistribuito.
         // Va nei Non Vinti e, se Auto-accumulo è attivo, viene subito accumulato nel Totale Database per la partita successiva!
         const prizePool = parseFloat(document.getElementById('prizePool').value) || 0;
-        const currency = document.getElementById('currencySelect').value || '€';
+        const currency = document.getElementById('currencySelect').value || '£';
 
         if (!cartelleWins.tombola.won && !prizeDelaysConfig.tombola.expired) {
             prizeDelaysConfig.tombola.expired = true;
@@ -851,7 +863,7 @@ function startTombolaApp() {
         const winners = document.getElementById('winPopupWinners');
 
         if (!popup || !title || !details || !winNumbers || !cartellaIdElement || !winners) return;
-        const currency = document.getElementById('currencySelect').value || '€';
+        const currency = document.getElementById('currencySelect').value || '£';
         const displayAmount = Number(savedAmount) || 0;
 
         title.textContent = currentLanguage === 'it' ? 'PARTITA TERMINATA SENZA TOMBOLA' : 'GAME ENDED WITHOUT TOMBOLA';
@@ -1272,21 +1284,16 @@ function startTombolaApp() {
 
             const toggle = document.createElement('label');
             toggle.className = 'color-toggle';
+            toggle.title = 'Gestito dalla Console Regia';
             const toggleInput = document.createElement('input');
             toggleInput.type = 'checkbox';
-            toggleInput.checked = activeColorSheets[color.id] && activeColorSheets[color.id].some(s => s.active);
-
-            toggleInput.addEventListener('change', function() {
-                const colorType = color.id;
-                const isActive = this.checked;
-                if (activeColorSheets[colorType]) {
-                    activeColorSheets[colorType].forEach(sheet => { sheet.active = isActive; });
-                }
-                updateCartelleExtractedNumbers();
-                updateWinsDisplay();
-                updateGameStats();
-                if (aiIntelligenceEnabled) analyzeAllCartelleAdvanced();
-            });
+            toggleInput.disabled = true;
+            toggleInput.title = 'Gestito dalla Console Regia';
+            toggleInput.setAttribute('aria-label', `${color.name} gestito dalla Console Regia`);
+            const sheets = activeColorSheets[color.id];
+            toggleInput.checked = sheets && sheets.length > 0
+                ? sheets.some(s => s.active)
+                : Boolean(regiaColorEnabled[color.id]);
 
             const toggleSlider = document.createElement('span');
             toggleSlider.className = 'color-toggle-slider';
@@ -1308,7 +1315,13 @@ function startTombolaApp() {
             if (colorType && activeColorSheets[colorType]) {
                 const existing = activeColorSheets[colorType].find(s => s.code === colorCode);
                 if (existing) existing.count++;
-                else activeColorSheets[colorType].push({ code: colorCode, active: Boolean(activateAllColors), count: 1 });
+                else {
+                    activeColorSheets[colorType].push({
+                        code: colorCode,
+                        active: Boolean(activateAllColors || regiaColorEnabled[colorType]),
+                        count: 1
+                    });
+                }
             }
         });
         initColorControls();
@@ -1572,7 +1585,7 @@ function startTombolaApp() {
         container.innerHTML = '';
 
         if (generatedCartelle.length === 0) {
-            container.innerHTML = '<div style="text-align: center; padding: 50px; color: #666;">Nessuna cartella generata. Clicca su "Genera Cartelle" per iniziare.</div>';
+            container.innerHTML = '';
             return;
         }
 
@@ -1992,7 +2005,7 @@ function startTombolaApp() {
         if (!banner || !title || !sub) return;
 
         const prizePool = parseFloat(document.getElementById('prizePool').value) || 0;
-        const currency = document.getElementById('currencySelect').value || '€';
+        const currency = document.getElementById('currencySelect').value || '£';
         let pct = 0.05;
         if (type === 'terno') pct = 0.10;
         else if (type === 'quaterna') pct = 0.15;
@@ -2171,6 +2184,7 @@ function startTombolaApp() {
 
         winningNumbersByCartella = {};
         activeColorSheets = { blue: [], orange: [], green: [], yellow:[] };
+        regiaColorEnabled = { blue: false, orange: false, green: false, yellow: false };
 
         aiAdvancedData = {
             lastAnalysis: null, cartelleAnalysis: {}, coverageIndex: 0,
@@ -3030,7 +3044,7 @@ function startTombolaApp() {
                 green: { cartelle: 0, active: 0, gold: 0, ambo: 0, terno: 0, quaterna: 0, cinquina: 0, tombola: 0, totalWins: 0 },
                 yellow: { cartelle: 0, active: 0, gold: 0, ambo: 0, terno: 0, quaterna: 0, cinquina: 0, tombola: 0, totalWins: 0 }
             },
-            prizeStats: { totalPrize: 0, goldPrize: 0, amboPrize: 0, ternoPrize: 0, quaternaPrize: 0, cinquinaPrize: 0, tombolaPrize: 0, currency: "€" }
+            prizeStats: { totalPrize: 0, goldPrize: 0, amboPrize: 0, ternoPrize: 0, quaternaPrize: 0, cinquinaPrize: 0, tombolaPrize: 0, currency: "£" }
         };
 
         if (!fromRemote) {
@@ -3091,6 +3105,8 @@ function startTombolaApp() {
         });
 
         document.getElementById('prizePool').value = '0';
+        const regiaPoolInputReset = document.getElementById('regiaPrizePoolInput');
+        if (regiaPoolInputReset) regiaPoolInputReset.value = '0';
         updatePrizes();
 
         document.getElementById('win-gold-value').textContent = '--';
@@ -3112,9 +3128,10 @@ function startTombolaApp() {
         document.getElementById('win-cinquina-details-large').innerHTML = '';
         document.getElementById('win-tombola-details-large').innerHTML = '';
 
+        regiaColorEnabled = { blue: false, orange: false, green: false, yellow: false };
         Object.keys(activeColorSheets).forEach(color => {
             activeColorSheets[color].forEach(sheet => {
-                sheet.active = effectiveCardMode === 'tavolo';
+                sheet.active = false;
             });
         });
 
@@ -3151,6 +3168,7 @@ function startTombolaApp() {
 
         if (!fromRemote && window.TombolaSync) {
             window.TombolaSync.broadcastResetGame(true, parseFloat(document.getElementById('prizePool').value) || 0, document.getElementById('currencySelect').value);
+            window.TombolaSync.broadcastColorsUpdate({ ...regiaColorEnabled });
         }
     }
 
@@ -3202,6 +3220,7 @@ function startTombolaApp() {
 
         const audioText = document.getElementById('audio-text');
         if (audioText) audioText.textContent = audioEnabled ? lang.audioOn : lang.audioOff;
+        syncTvButtonVisualState();
 
         if (document.getElementById('tombolaPopup').style.display === 'flex') {
             document.getElementById('popupTitle').textContent = lang.popupTitle;
@@ -3581,7 +3600,7 @@ function startTombolaApp() {
         });
 
         const prizePool = parseFloat(document.getElementById('prizePool')?.value || '0') || 0;
-        const currency = document.getElementById('currencySelect')?.value || '€';
+        const currency = document.getElementById('currencySelect')?.value || '£';
         regiaStateManager.syncPrizesState({
             prizePool,
             currency,
@@ -3591,7 +3610,7 @@ function startTombolaApp() {
         const buildColorSlice = (color) => {
             const sheets = activeColorSheets[color] || [];
             const count = sheets.reduce((sum, s) => sum + s.count, 0);
-            const active = sheets.length > 0 ? sheets.some(s => s.active) : false;
+            const active = sheets.length > 0 ? sheets.some(s => s.active) : Boolean(regiaColorEnabled[color]);
             return { count, active };
         };
         regiaStateManager.syncColorsState({
@@ -3912,6 +3931,151 @@ function startTombolaApp() {
         initTvGraphicsManager();
         initCloudJackpotManager();
         void initTavoloCardsSection();
+        initThemeAndTvDisplay();
+    }
+
+    function applyThemeMode(isDark, persist = true) {
+        document.body.classList.toggle('dark-mode', Boolean(isDark));
+        document.body.classList.toggle('light-mode', !isDark);
+        document.documentElement.classList.toggle('dark-theme', Boolean(isDark));
+        document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+        document.documentElement.style.backgroundColor = isDark ? '#040714' : '#f1ead8';
+
+        const themeMeta = document.querySelector('meta[name="theme-color"]');
+        if (themeMeta) {
+            themeMeta.setAttribute('content', isDark ? '#040714' : '#f1ead8');
+        }
+        const themeSwitchEl = document.getElementById('themeSwitch');
+        if (themeSwitchEl) {
+            themeSwitchEl.checked = Boolean(isDark);
+        }
+        if (persist) {
+            try {
+                localStorage.setItem('tombola_theme_mode', isDark ? 'dark' : 'light');
+            } catch {
+                // Ignore storage quota errors on restricted TV browsers
+            }
+        }
+    }
+
+    function applyTvResponsiveLayout() {
+        const vw = window.innerWidth || document.documentElement.clientWidth || 1360;
+        const vh = window.innerHeight || document.documentElement.clientHeight || 760;
+        const ua = navigator.userAgent || '';
+        const isTvDevice = isSmartTvUserAgent(ua);
+        const layout = computeTvStageLayout(vw, vh, tvStudioActive, ua);
+
+        document.body.classList.toggle('tv-device', Boolean(isTvDevice || tvStudioActive));
+
+        if (layout.shouldScale) {
+            document.body.classList.add('tv-scaled');
+            document.body.style.setProperty('--tv-stage-scale', String(layout.scale));
+            document.body.style.setProperty('--tv-stage-width', `${layout.virtualWidth}px`);
+            document.body.style.setProperty('--tv-stage-height', `${layout.virtualHeight}px`);
+        } else {
+            document.body.classList.remove('tv-scaled');
+            document.body.style.removeProperty('--tv-stage-scale');
+            document.body.style.removeProperty('--tv-stage-width');
+            document.body.style.removeProperty('--tv-stage-height');
+        }
+
+        // Fallback esplicito per browser Samsung Tizen / LG webOS precedenti a Chromium 88 senza CSS aspect-ratio
+        const supportsAspectRatio = typeof window.CSS !== 'undefined' && typeof window.CSS.supports === 'function' && window.CSS.supports('aspect-ratio', '1 / 1');
+        const boardContainer = document.querySelector('.board-container');
+        const mainLayout = document.querySelector('.main-layout');
+        if (boardContainer && mainLayout) {
+            if (!supportsAspectRatio) {
+                const fallbackW = computeBoardFallbackWidth(mainLayout.clientHeight || layout.virtualHeight - 130);
+                if (fallbackW > 0) {
+                    boardContainer.style.width = `${fallbackW}px`;
+                }
+            } else {
+                boardContainer.style.removeProperty('width');
+            }
+        }
+    }
+
+    function syncTvButtonVisualState() {
+        const isNativeFs = Boolean(getFullscreenElement(document));
+        const active = tvStudioActive || isNativeFs;
+        const btn = document.getElementById('fullscreenBtn');
+        const label = document.getElementById('tv-mode-text');
+        if (btn) {
+            btn.classList.toggle('tv-active', active);
+            const icon = btn.querySelector('i');
+            if (icon) {
+                icon.className = active ? 'fas fa-compress' : 'fas fa-tv';
+            }
+        }
+        if (label) {
+            label.textContent = active
+                ? (currentLanguage === 'it' ? 'Esci TV' : 'Exit TV')
+                : (currentLanguage === 'it' ? 'Modalità TV' : 'TV Mode');
+        }
+    }
+
+    async function toggleTvStudioMode(forceActive) {
+        const nextActive = typeof forceActive === 'boolean' ? forceActive : !(tvStudioActive || Boolean(getFullscreenElement(document)));
+        tvStudioActive = nextActive;
+        document.body.classList.toggle('tv-studio-active', tvStudioActive);
+
+        if (tvStudioActive) {
+            // In Modalità TV forziamo il tema scuro ad alto contrasto (senza sovrascrivere la preferenza desktop se non cambiata dall'utente)
+            if (!document.body.classList.contains('dark-mode')) {
+                applyThemeMode(true, false);
+            }
+            await requestVendorFullscreen(document.documentElement);
+            try {
+                if (navigator.wakeLock && typeof navigator.wakeLock.request === 'function') {
+                    tvWakeLockSentinel = await navigator.wakeLock.request('screen');
+                }
+            } catch {
+                // WakeLock non supportato o bloccato dal browser TV
+            }
+        } else {
+            if (getFullscreenElement(document)) {
+                await exitVendorFullscreen(document);
+            }
+            try {
+                if (tvWakeLockSentinel && typeof tvWakeLockSentinel.release === 'function') {
+                    await tvWakeLockSentinel.release();
+                    tvWakeLockSentinel = null;
+                }
+            } catch {
+                // Ignora errore rilascio WakeLock
+            }
+        }
+
+        syncTvButtonVisualState();
+        applyTvResponsiveLayout();
+    }
+
+    function initThemeAndTvDisplay() {
+        let savedTheme = 'dark';
+        try {
+            savedTheme = localStorage.getItem('tombola_theme_mode') || 'dark';
+        } catch {
+            savedTheme = 'dark';
+        }
+        const ua = navigator.userAgent || '';
+        const autoTv = shouldAutoEnableTvMode(window.location.search, ua);
+        const isSmartTv = isSmartTvUserAgent(ua);
+
+        // Su Smart TV o di default forziamo la Dark Mode Studio
+        const useDark = isSmartTv || autoTv ? true : savedTheme !== 'light';
+        applyThemeMode(useDark, false);
+
+        if (autoTv) {
+            tvStudioActive = true;
+            document.body.classList.add('tv-studio-active');
+        }
+
+        applyTvResponsiveLayout();
+        syncTvButtonVisualState();
+
+        window.addEventListener('resize', applyTvResponsiveLayout);
+        window.addEventListener('orientationchange', applyTvResponsiveLayout);
+        window.setTimeout(applyTvResponsiveLayout, 250);
     }
 
     // ===== FUNZIONI SEZIONE TAVOLO GIOCO (30 FOGLI PERMANENTI & SELEZIONE IN GIOCO) =====
@@ -4091,7 +4255,7 @@ function startTombolaApp() {
                 selectedTavoloGameId,
                 activeTavoloSheets,
                 participatingGiocatori,
-                isColorActive: () => true,
+                isColorActive,
             })) {
                 c.extractedNumbers = c.numbers
                     .map(n => n.number)
@@ -4099,7 +4263,7 @@ function startTombolaApp() {
             }
         });
 
-        updateColorSheetsFromCartelle(true);
+        updateColorSheetsFromCartelle(false);
         renderTavoloSheetsSelectorGrid();
         renderCartelle();
         updateWinsDisplay();
@@ -4290,10 +4454,18 @@ function startTombolaApp() {
             effectiveCardMode = 'tavolo';
             writeTavoloUiPrefs({ mode: 'tavolo', selectedGameId: selectedTavoloGameId });
             await refreshTavoloSetsSelect();
-            if (!currentLoadedTavoloSet || currentLoadedTavoloSet.gameId !== selectedTavoloGameId) {
-                await loadTavoloSetIntoApp(selectedTavoloGameId, { silent: true });
-            } else {
+            if (currentLoadedTavoloSet && currentLoadedTavoloSet.gameId === selectedTavoloGameId) {
                 applyLoadedTavoloSetToRuntime(currentLoadedTavoloSet, 'DB');
+            } else {
+                generatedCartelle = [];
+                winningNumbersByCartella = {};
+                activeColorSheets = { blue: [], orange: [], green: [], yellow: [] };
+                initColorControls();
+                renderTavoloSheetsSelectorGrid();
+                renderCartelle();
+                updateCartelleStats();
+                updateWinsDisplay();
+                updateGameStats();
             }
         } else if (mode === 'online') {
             effectiveCardMode = 'online';
@@ -4311,22 +4483,13 @@ function startTombolaApp() {
     async function initTavoloCardsSection() {
         const prefs = readTavoloUiPrefs();
         selectedTavoloGameId = prefs.selectedGameId || DEFAULT_TAVOLO_GAME_ID;
-        showOnlySelectedTavoloSheets = Boolean(prefs.showOnlySelectedSheets);
+        showOnlySelectedTavoloSheets = false;
 
         await refreshTavoloSetsSelect();
         renderTavoloSheetsSelectorGrid();
-
-        if (prefs.mode === 'tavolo') {
-            await loadTavoloSetIntoApp(selectedTavoloGameId, { silent: true });
-        }
-
-        // Default initial screen in Cartelle is the initial menu unless explicitly opened via ?autostart=1
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('autostart') === '1' && prefs.mode === 'tavolo') {
-            await setCartellePlayMode('tavolo');
-        } else {
-            await setCartellePlayMode('menu');
-        }
+        renderCartelle();
+        updateCartelleStats();
+        await setCartellePlayMode('menu');
     }
 
     function setupEventListeners() {
@@ -4376,12 +4539,37 @@ function startTombolaApp() {
         });
 
         document.getElementById('fullscreenBtn').addEventListener('click', function() {
-            if (!document.fullscreenElement) document.documentElement.requestFullscreen();
-            else document.exitFullscreen();
+            void toggleTvStudioMode();
+        });
+
+        const handleFullscreenChange = () => {
+            const isFs = Boolean(getFullscreenElement(document));
+            if (!isFs && tvStudioActive && !shouldAutoEnableTvMode(window.location.search, navigator.userAgent || '')) {
+                // Se l'utente ha premuto Esc/Indietro dal browser TV per uscire dal fullscreen nativo, manteniamo il layout scalato ma aggiorniamo il pulsante se necessario
+                syncTvButtonVisualState();
+            } else {
+                syncTvButtonVisualState();
+            }
+            applyTvResponsiveLayout();
+        };
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+
+        document.addEventListener('keydown', function(e) {
+            // Tasti telecomando Samsung Tizen (10009), LG webOS (461) o Escape
+            if (e.key === 'Escape' || e.keyCode === 10009 || e.keyCode === 461) {
+                if (document.getElementById('cartelleSection')?.classList.contains('active')) {
+                    hideCartelleSection();
+                } else if (document.getElementById('regiaSection')?.classList.contains('active')) {
+                    closeRegia();
+                } else if (tvStudioActive) {
+                    void toggleTvStudioMode(false);
+                }
+            }
         });
 
         document.getElementById('themeSwitch').addEventListener('change', function() {
-            document.body.classList.toggle('dark-mode');
+            applyThemeMode(this.checked, true);
         });
 
         document.getElementById('languageSwitch').addEventListener('change', function() {
@@ -4682,9 +4870,16 @@ function startTombolaApp() {
             }
         });
 
+        document.getElementById('regiaPrizePoolInput')?.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                document.getElementById('regiaApplyPrizeBtn')?.click();
+            }
+        });
+
         document.getElementById('regiaApplyPrizeBtn').addEventListener('click', async function() {
             const val = parseFloat(document.getElementById('regiaPrizePoolInput').value) || 0;
-            const curr = document.getElementById('regiaCurrencySelect').value;
+            const curr = document.getElementById('regiaCurrencySelect').value || '£';
             document.getElementById('prizePool').value = val;
             document.getElementById('currencySelect').value = curr;
             updatePrizes();
@@ -4693,13 +4888,22 @@ function startTombolaApp() {
             if (val > 0 && extractedNumbers.length === 0) {
                 await maybeAutoRecallBankIntoNextGame('apply_prize');
             }
+            const finalPool = parseFloat(document.getElementById('prizePool').value) || 0;
+            if (window.TombolaSync) {
+                window.TombolaSync.broadcastPrizePoolUpdate(finalPool, curr);
+            }
             void regiaStateManager.syncRegiaCardsWithFirestore({ immediate: true, source: 'regia_prizes' });
         });
 
         document.getElementById('regiaCurrencySelect').addEventListener('change', function() {
-            document.getElementById('currencySelect').value = this.value;
+            const curr = this.value || '£';
+            document.getElementById('currencySelect').value = curr;
             updatePrizes();
             syncRegiaUI();
+            const currentPool = parseFloat(document.getElementById('prizePool').value) || 0;
+            if (window.TombolaSync) {
+                window.TombolaSync.broadcastPrizePoolUpdate(currentPool, curr);
+            }
             void regiaStateManager.syncRegiaCardsWithFirestore({ immediate: true, source: 'regia_currency' });
         });
 
@@ -4733,7 +4937,7 @@ function startTombolaApp() {
                 }
 
                 const amountToSave = unclaimedGoldTotal;
-                const currency = document.getElementById('currencySelect')?.value || '€';
+                const currency = document.getElementById('currencySelect')?.value || '£';
                 const gameId = document.getElementById('gameId')?.value || 'TOM001';
 
                 saveCloudBtn.disabled = true;
@@ -4782,13 +4986,13 @@ function startTombolaApp() {
 
                     if (!currentBank || currentBank.accumulatedUnclaimed <= 0) {
                         showSuccessPopup(currentLanguage === 'it'
-                            ? "Il Database Cassa Cloud è a zero (€ 0.00). Nessun montepremi salvato da richiamare."
-                            : "Cloud Database Bank is empty (€ 0.00). No saved prizes to recall.");
+                            ? "Il Database Cassa Cloud è a zero (£ 0.00). Nessun montepremi salvato da richiamare."
+                            : "Cloud Database Bank is empty (£ 0.00). No saved prizes to recall.");
                         return;
                     }
 
                     const amountToRecall = currentBank.accumulatedUnclaimed;
-                    const currency = currentBank.currency || document.getElementById('currencySelect')?.value || '€';
+                    const currency = currentBank.currency || document.getElementById('currencySelect')?.value || '£';
                     const gameId = document.getElementById('gameId')?.value || 'TOM001';
 
                     showConfirmDialog(
@@ -5293,6 +5497,7 @@ function startTombolaApp() {
             if (!el) return;
             el.addEventListener('change', function() {
                 const isActive = this.checked;
+                regiaColorEnabled[colorKey] = isActive;
                 if (activeColorSheets[colorKey]) {
                     activeColorSheets[colorKey].forEach(sheet => { sheet.active = isActive; });
                 }
@@ -5303,6 +5508,9 @@ function startTombolaApp() {
                 initColorControls();
                 logRegiaEvent(`Cartelle colore ${colorKey.toUpperCase()}: ${isActive ? 'ATTIVATE' : 'DISATTIVATE'}.`, 'info');
                 syncRegiaUI();
+                if (window.TombolaSync) {
+                    window.TombolaSync.broadcastColorsUpdate({ ...regiaColorEnabled });
+                }
             });
         };
         setupColorToggle('regiaToggleBlue', 'blue');
@@ -5515,16 +5723,46 @@ function startTombolaApp() {
             }
         });
 
-        // 7. Ricezione aggiornamento Montepremi e Valuta
+        // 7. Ricezione aggiornamento Montepremi e Valuta da Regia
         window.TombolaSync.on('PRIZE_POOL_UPDATED', (data) => {
             if (data && typeof data.prizePool === 'number') {
                 const poolInput = document.getElementById('prizePool');
+                const regiaPoolInput = document.getElementById('regiaPrizePoolInput');
                 if (poolInput) poolInput.value = data.prizePool;
+                if (regiaPoolInput) regiaPoolInput.value = data.prizePool;
                 if (data.currency) {
                     const currSelect = document.getElementById('currencySelect');
+                    const regiaCurrSelect = document.getElementById('regiaCurrencySelect');
                     if (currSelect) currSelect.value = data.currency;
+                    if (regiaCurrSelect) regiaCurrSelect.value = data.currency;
                 }
                 updatePrizes();
+                syncRegiaUI();
+            }
+        });
+
+        // 7b. Ricezione stato Colori Cartelle da Regia
+        const applyRemoteColorsState = (colorsMap) => {
+            if (!colorsMap || typeof colorsMap !== 'object') return;
+            ['blue', 'orange', 'green', 'yellow'].forEach((c) => {
+                if (colorsMap[c] !== undefined) {
+                    const isActive = Boolean(colorsMap[c]);
+                    regiaColorEnabled[c] = isActive;
+                    if (activeColorSheets[c]) {
+                        activeColorSheets[c].forEach((sheet) => { sheet.active = isActive; });
+                    }
+                }
+            });
+            updateCartelleExtractedNumbers();
+            updateWinsDisplay();
+            updateGameStats();
+            initColorControls();
+            syncRegiaUI();
+        };
+
+        window.TombolaSync.on('COLORS_UPDATED', (data) => {
+            if (data && data.colors) {
+                applyRemoteColorsState(data.colors);
             }
         });
 
@@ -5540,6 +5778,23 @@ function startTombolaApp() {
         const applyRemoteGameState = (data) => {
             if (data && data.state) {
                 const st = data.state;
+                if (typeof st.prizePool === 'number' && st.prizePool > 0) {
+                    const poolInput = document.getElementById('prizePool');
+                    const regiaPoolInput = document.getElementById('regiaPrizePoolInput');
+                    if (poolInput) poolInput.value = st.prizePool;
+                    if (regiaPoolInput) regiaPoolInput.value = st.prizePool;
+                    if (st.currency) {
+                        const currSelect = document.getElementById('currencySelect');
+                        const regiaCurrSelect = document.getElementById('regiaCurrencySelect');
+                        if (currSelect) currSelect.value = st.currency;
+                        if (regiaCurrSelect) regiaCurrSelect.value = st.currency;
+                    }
+                    updatePrizes();
+                    syncRegiaUI();
+                }
+                if (st.colors) {
+                    applyRemoteColorsState(st.colors);
+                }
                 if (st.unclaimedPot !== undefined && st.unclaimedPot > 0 && unclaimedGoldTotal === 0) {
                     unclaimedGoldTotal = st.unclaimedPot;
                     updateUnclaimedPotDisplay();
@@ -5580,9 +5835,13 @@ function startTombolaApp() {
 
         // Se l'URL contiene ?view=tv, apri direttamente lo Schermo TV Studio senza Regia attiva
         const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('view') === 'tv' || urlParams.get('mode') === 'tv') {
+        if (urlParams.get('view') === 'tv' || urlParams.get('mode') === 'tv' || urlParams.get('tv') === '1') {
             closeRegia();
+            tvStudioActive = true;
             document.body.classList.add('tv-studio-active');
+            applyThemeMode(true, false);
+            applyTvResponsiveLayout();
+            syncTvButtonVisualState();
             logRegiaEvent('Modalità Schermo TV Studio attiva.', 'info');
         }
     }
@@ -5612,6 +5871,9 @@ function startTombolaApp() {
         highlightWinningElements,
         getTvGraphicState: () => tvGraphicState,
         applyTvGraphicState,
+        applyTvResponsiveLayout,
+        toggleTvStudioMode,
+        applyThemeMode,
         setupRealtimeWebSocketSync
     };
 

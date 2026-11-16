@@ -131,8 +131,8 @@
                     <div class="montepremi-container" style="height: 240px;">
                         <div class="montepremi-header"><h2><i class="fas fa-coins"></i> <span id="prize-pool-title">Montepremi</span></h2></div>
                         <div class="montepremi-input-container">
-                            <input type="number" class="montepremi-input" id="prizePool" placeholder="Somma totale" min="0" value="0">
-                            <select class="currency-select" id="currencySelect"><option value="€">€</option><option value="£">£</option><option value="$">$</option></select>
+                            <input type="number" class="montepremi-input" id="prizePool" placeholder="Somma totale" min="0" value="0" disabled readonly title="Gestito dalla Console Regia">
+                            <select class="currency-select" id="currencySelect" disabled title="Gestito dalla Console Regia"><option value="£" selected>£</option><option value="€">€</option><option value="$">$</option></select>
                         </div>
                         <div class="premi-list">
                             <div class="premi-item"><span><i class="fas fa-star gold-text"></i> <span id="gold-text">Numero Gold</span></span><span class="premi-value" id="goldPrize">-- <span class="percentage">(5%)</span></span></div>
@@ -224,7 +224,7 @@
                 <div class="box-c-container" style="width: 200px; height: 100%; background: var(--unclaimed-pot-bg); border-color: var(--unclaimed-pot-color);">
                     <div class="box-c-header"><h2 style="font-size: 10px;"><i class="fas fa-piggy-bank"></i> <span id="unclaimed-pot-title">Montepremi Non Vinti</span></h2></div>
                     <div class="box-c-content">
-                        <div class="unclaimed-pot" id="unclaimedPotDisplay">€ 0.00</div>
+                        <div class="unclaimed-pot" id="unclaimedPotDisplay">£ 0.00</div>
                     </div>
                 </div>
             </div>

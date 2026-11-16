@@ -349,7 +349,7 @@ export function createInitialRegiaState(): RegiaStateSnapshot {
     },
     prizes: {
       prizePool: 0,
-      currency: '€',
+      currency: '£',
       unclaimedCurrentGame: 0,
       breakdown: computePrizeBreakdown(0),
     },
@@ -363,7 +363,7 @@ export function createInitialRegiaState(): RegiaStateSnapshot {
       statusLabel: 'Inizializzazione...',
       balance: 0,
       currentGameUnclaimed: 0,
-      currency: '€',
+      currency: '£',
       lastUpdated: '--',
       history: [],
       isSyncing: false,
@@ -436,6 +436,7 @@ export class RegiaStateManager {
   private lastSavedConfigSig: string | null = null;
   private configSyncTimer: ReturnType<typeof setTimeout> | null = null;
   private isApplyingRemoteConfig = false;
+  private hasAppliedInitialRemoteConfig = false;
   private nextLogId = 2;
 
   public getState(): RegiaStateSnapshot {
@@ -689,10 +690,15 @@ export class RegiaStateManager {
       try {
         const dualStatus = await initDualDatabases();
 
-        // 1. Load Jackpot Bank (both currentGameUnclaimed + accumulatedUnclaimed) & History
+        // 1. Load Jackpot Bank (accumulatedUnclaimed + currentGameUnclaimed) & History
+        // Startup starts strictly at zero/£ for the current session prizes; cloud bank balance only mirrors stored reserve.
         try {
           const { bank, history, status } = await getDualJackpotBankAndHistory(8);
-          this.applyJackpotBankData(bank, status, history, true);
+          const bootBank =
+            bank.accumulatedUnclaimed === 0 && bank.currentGameUnclaimed === 0
+              ? { ...bank, currency: '£' }
+              : bank;
+          this.applyJackpotBankData(bootBank, status, history, false);
         } catch (bankErr) {
           console.warn('[RegiaState] Initial dual bank load error:', bankErr);
           this.updateCloudBankState({
@@ -709,12 +715,13 @@ export class RegiaStateManager {
         // 2. Load Regia Profiles + Active Profile ID
         await this.loadProfilesFromFirestore();
 
-        // 3. Load Unified Game Config Document (regia_config/main: difficoltà, soglie, premi)
+        // 3. Load Unified Game Config Document (regia_config/main: difficoltà e soglie; premi partono sempre a 0 e £)
         try {
           const unifiedRes = await getDualRegiaGameConfig();
           if (unifiedRes.config) {
             this.applyUnifiedGameConfig(unifiedRes.config, {
               logSource: unifiedRes.fromCloud ? 'Cloud DB (regia_config/main)' : 'Cache Locale',
+              applyPrizes: false,
             });
           } else {
             await this.syncRegiaCardsWithFirestore({ immediate: true, source: 'init_seed' });
@@ -746,7 +753,7 @@ export class RegiaStateManager {
 
   public applyUnifiedGameConfig(
     config: RegiaGameConfigDoc,
-    options: { logSource?: string } = {}
+    options: { logSource?: string; applyPrizes?: boolean } = {}
   ): boolean {
     const clean = sanitizeRegiaGameConfig(config);
     const sig = buildRegiaGameConfigSignature(clean);
@@ -770,12 +777,16 @@ export class RegiaStateManager {
         },
         { render: true, notifyEngineSync: true }
       );
-      this.syncPrizesState(prizesPatch);
-      this.emitPrizesSync();
+      if (options.applyPrizes !== false) {
+        this.syncPrizesState(prizesPatch);
+        this.emitPrizesSync();
+      }
 
       if (options.logSource) {
         this.addLog(
-          `Configurazione partita unificata caricata (${options.logSource}): difficoltà ${clean.difficulty.level.toUpperCase()}, montepremi ${clean.prizes.currency} ${clean.prizes.prizePool.toFixed(2)}.`,
+          options.applyPrizes === false
+            ? `Profilo e soglie caricati (${options.logSource}): difficoltà ${clean.difficulty.level.toUpperCase()} (montepremi a ${this.state.prizes.currency} 0.00).`
+            : `Configurazione partita unificata caricata (${options.logSource}): difficoltà ${clean.difficulty.level.toUpperCase()}, montepremi ${clean.prizes.currency} ${clean.prizes.prizePool.toFixed(2)}.`,
           'info'
         );
       }
@@ -791,6 +802,7 @@ export class RegiaStateManager {
     if (this.isApplyingRemoteConfig) {
       return false;
     }
+    this.hasAppliedInitialRemoteConfig = true;
 
     const payload = stateToUnifiedGameConfig(this.state);
     const sig = buildRegiaGameConfigSignature(payload);
@@ -888,7 +900,9 @@ export class RegiaStateManager {
 
     if (!this.unsubGameConfig) {
       this.unsubGameConfig = subscribeToRegiaGameConfig((config) => {
-        this.applyUnifiedGameConfig(config);
+        const applyPrizes = this.hasAppliedInitialRemoteConfig;
+        this.hasAppliedInitialRemoteConfig = true;
+        this.applyUnifiedGameConfig(config, { applyPrizes });
       });
     }
   }
@@ -912,7 +926,10 @@ export class RegiaStateManager {
       }
     }
 
+    const balanceVal = Number(bankData.accumulatedUnclaimed) || 0;
     const currentUnclaimed = Number(bankData.currentGameUnclaimed) || 0;
+    const normalizedCurrency =
+      balanceVal === 0 && currentUnclaimed === 0 ? '£' : bankData.currency || '£';
 
     this.updateCloudBankState({
       connected: dualStatus.anyCloudConnected,
@@ -922,9 +939,9 @@ export class RegiaStateManager {
       appwriteConfigured: dualStatus.appwriteConfigured,
       dbMode: dualStatus.mode,
       statusLabel: dualStatus.statusLabel,
-      balance: Number(bankData.accumulatedUnclaimed) || 0,
+      balance: balanceVal,
       currentGameUnclaimed: currentUnclaimed,
-      currency: bankData.currency || '€',
+      currency: normalizedCurrency,
       lastUpdated: formattedTime,
       history: history ?? this.state.cloudBank.history,
       isSyncing: false,
@@ -1438,7 +1455,7 @@ export class RegiaStateManager {
                   <span class="entry-time"><i class="far fa-clock"></i> ${escapeHtml(dateStr)} - ${label} [${escapeHtml(item.gameId || 'TOM')}]</span>
                   <span class="entry-note">${escapeHtml(item.note || '')}</span>
                 </div>
-                <span class="entry-amount">${sign}€ ${(item.amount || 0).toFixed(2)}</span>
+                <span class="entry-amount">${sign}${escapeHtml(currency || '£')} ${(item.amount || 0).toFixed(2)}</span>
               </div>
             `;
           })

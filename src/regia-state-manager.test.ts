@@ -219,3 +219,61 @@ test('stateToUnifiedGameConfig and applyUnifiedGameConfig keep difficulty, thres
   assert.equal(receiver.getState().prizes.breakdown.tombola, 135);
   unsubPrizes();
 });
+
+test('createInitialRegiaState defaults to 0 prize pool, £ currency, and all colors OFF; applyUnifiedGameConfig honors applyPrizes=false on cold boot', () => {
+  const initial = createInitialRegiaState();
+  assert.equal(initial.prizes.prizePool, 0);
+  assert.equal(initial.prizes.currency, '£');
+  assert.equal(initial.prizes.unclaimedCurrentGame, 0);
+  assert.equal(initial.cloudBank.balance, 0);
+  assert.equal(initial.cloudBank.currency, '£');
+  assert.equal(initial.colors.totalActiveColors, 0);
+  assert.equal(initial.colors.blue.active, false);
+  assert.equal(initial.colors.orange.active, false);
+  assert.equal(initial.colors.green.active, false);
+  assert.equal(initial.colors.yellow.active, false);
+
+  const bootManager = new RegiaStateManager();
+  let prizesEventCount = 0;
+  const unsub = bootManager.onPrizesConfigSync(() => {
+    prizesEventCount++;
+  });
+
+  const applied = bootManager.applyUnifiedGameConfig(
+    {
+      id: 'main',
+      activeProfileId: 'medium',
+      difficulty: {
+        enabled: true,
+        level: 'medium',
+        forcedMinAmbo: 10,
+        forcedMinTerno: 20,
+        forcedMinQuaterna: 34,
+        forcedMinCinquina: 48,
+        forcedMinTombola: 65,
+      },
+      thresholds: {
+        delayMaxGold: 25,
+        delayMaxAmbo: 20,
+        delayMaxTerno: 35,
+        delayMaxQuaterna: 50,
+        delayMaxCinquina: 65,
+        delayMaxTombola: 90,
+      },
+      prizes: {
+        prizePool: 500,
+        currency: '€',
+      },
+      updatedAt: '2026-06-01T12:00:00.000Z',
+    },
+    { logSource: 'Cold Boot DB', applyPrizes: false }
+  );
+
+  assert.equal(applied, true);
+  assert.equal(bootManager.getState().engine.level, 'medium');
+  assert.equal(bootManager.getState().prizes.prizePool, 0);
+  assert.equal(bootManager.getState().prizes.currency, '£');
+  assert.equal(prizesEventCount, 0);
+  unsub();
+});
+

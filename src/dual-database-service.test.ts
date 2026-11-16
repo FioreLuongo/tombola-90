@@ -32,7 +32,7 @@ test('sanitizeJackpotBankData handles currentGameUnclaimed and accumulatedUnclai
   const empty = buildEmptyJackpotBank();
   assert.equal(empty.accumulatedUnclaimed, 0);
   assert.equal(empty.currentGameUnclaimed, 0);
-  assert.equal(empty.currency, '€');
+  assert.equal(empty.currency, '£');
 
   const cleaned = sanitizeJackpotBankData({
     accumulatedUnclaimed: 125.456,
@@ -54,7 +54,7 @@ test('sanitizeJackpotBankData handles currentGameUnclaimed and accumulatedUnclai
   });
   assert.equal(clamped.accumulatedUnclaimed, 0);
   assert.equal(clamped.currentGameUnclaimed, 0);
-  assert.equal(clamped.currency, '€');
+  assert.equal(clamped.currency, '£');
   assert.equal(clamped.totalGamesRecorded, 0);
 });
 

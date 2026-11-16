@@ -54,15 +54,26 @@
   --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+html {
+  background-color: #040714;
+  color-scheme: dark;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
 body.dark-mode {
   --bg-main: radial-gradient(circle at 50% 10%, #0a132e 0%, #040713 70%, #010309 100%);
-  --card-bg: rgba(10, 18, 44, 0.94);
+  --card-bg: rgba(10, 18, 44, 0.96);
   --card-border: 1px solid rgba(212, 175, 55, 0.4);
   --card-shadow: 0 12px 30px -4px rgba(0, 0, 0, 0.8), 0 0 1px 1px rgba(212, 175, 55, 0.25);
   --text-main: #f8fafc;
   --text-muted: #94a3b8;
   --unclaimed-pot-bg: linear-gradient(135deg, rgba(202, 138, 4, 0.25) 0%, rgba(10, 18, 44, 0.95) 100%);
   --unclaimed-pot-color: #fde047;
+  background-color: #040714;
+  color: #f8fafc;
+  color-scheme: dark;
 }
 
 body:not(.dark-mode) {
@@ -78,6 +89,9 @@ body:not(.dark-mode) {
   --circle-bg: #f8fafc;
   --unclaimed-pot-bg: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
   --unclaimed-pot-color: #78350f;
+  background-color: #f1ead8;
+  color: #0f172a;
+  color-scheme: light;
 }
 
 * {
@@ -100,8 +114,8 @@ html, body {
 }
 
 body {
+  background-color: #040714;
   background: var(--bg-main);
-  background-attachment: fixed;
   color: var(--text-main);
   padding: 8px 14px;
   position: relative;
@@ -422,8 +436,17 @@ nav {
 
 .switch input {
   opacity: 0;
-  width: 0;
-  height: 0;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.switch input:disabled {
+  cursor: not-allowed;
 }
 
 .slider {
@@ -1000,6 +1023,13 @@ body:not(.dark-mode) .smorfia-text {
   padding: 6px 4px;
 }
 
+.card-last-numbers h2 {
+  font-size: clamp(8px, 1.05vh, 10px);
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+  padding-left: 8px;
+}
+
 .last-numbers-container-vertical {
   display: flex;
   flex-direction: column;
@@ -1114,6 +1144,17 @@ body:not(.dark-mode) .smorfia-text {
   margin: 0;
 }
 
+.regia-managed-hint {
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  color: rgba(250, 204, 21, 0.72);
+  margin-left: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
 .montepremi-input-container {
   display: flex;
   gap: 4px;
@@ -1134,6 +1175,14 @@ body:not(.dark-mode) .smorfia-text {
   font-family: 'Montserrat', sans-serif;
   outline: none;
   transition: var(--transition);
+}
+
+.montepremi-input:disabled,
+.currency-select:disabled {
+  opacity: 1 !important;
+  cursor: default;
+  color: var(--text-main);
+  -webkit-text-fill-color: var(--text-main);
 }
 
 .montepremi-input:focus, .currency-select:focus {
@@ -1360,7 +1409,7 @@ body:not(.dark-mode) .smorfia-text {
   width: 22px !important;
   height: 12px !important;
   flex-shrink: 0 !important;
-  cursor: pointer !important;
+  cursor: default !important;
 }
 
 .montepremi-container .color-toggle input {
@@ -1373,7 +1422,7 @@ body:not(.dark-mode) .smorfia-text {
 
 .montepremi-container .color-toggle-slider {
   position: absolute !important;
-  cursor: pointer !important;
+  cursor: default !important;
   top: 0 !important;
   left: 0 !important;
   right: 0 !important;
@@ -1641,19 +1690,22 @@ body:not(.dark-mode) .smorfia-text {
   align-items: center;
   justify-content: center;
   width: 100%;
-  padding-left: 12px;
+  padding-left: 10px;
+  padding-right: 2px;
+  box-sizing: border-box;
 }
 
 .countdown-header h2 {
-  font-size: clamp(9px, 1.2vh, 11px);
+  font-size: clamp(7.5px, 1.02vh, 9.2px);
   font-weight: 800;
   color: #f3e5ab;
   text-transform: uppercase;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
   margin: 0;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   text-shadow: 0 0 6px rgba(212, 175, 55, 0.4);
 }
 
@@ -7285,12 +7337,20 @@ body:not(.dark-mode) .montepremi-prizes-card {
   box-shadow: inset 0 1px 2px #ffffff, 0 2px 6px rgba(0, 0, 0, 0.05) !important;
 }
 
+body:not(.dark-mode) .regia-managed-hint {
+  color: #b45309 !important;
+}
+
 body:not(.dark-mode) .montepremi-input,
-body:not(.dark-mode) .currency-select {
+body:not(.dark-mode) .currency-select,
+body:not(.dark-mode) .montepremi-input:disabled,
+body:not(.dark-mode) .currency-select:disabled {
   background: #ffffff !important;
   border: 1.5px solid #d97706 !important;
   color: #0f172a !important;
+  -webkit-text-fill-color: #0f172a !important;
   font-weight: 800 !important;
+  opacity: 1 !important;
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06) !important;
 }
 
@@ -8291,8 +8351,84 @@ body.light-mode .dual-db-feedback.info {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
+/* ==========================================================================
+   SMART TV AUTO-FIT STAGE & MODALITÀ TV STUDIO (SAMSUNG TIZEN / LG WEBOS)
+   Garantisce visualizzazione integrale bordo-bordo su schermi TV 960x540,
+   1280x720, 1920x1080 e 4K senza tagli né perdita della Dark Mode.
+   ========================================================================== */
+body.tv-scaled {
+  width: var(--tv-stage-width, 1360px) !important;
+  height: var(--tv-stage-height, 760px) !important;
+  max-width: none !important;
+  max-height: none !important;
+  transform: scale(var(--tv-stage-scale, 1));
+  -webkit-transform: scale(var(--tv-stage-scale, 1));
+  transform-origin: top left;
+  -webkit-transform-origin: top left;
+  overflow: hidden !important;
+  position: fixed !important;
+  top: 0;
+  left: 0;
+}
 
+body.tv-scaled .cartelle-section,
+body.tv-scaled .regia-section,
+body.tv-scaled .popup-overlay,
+body.tv-scaled .win-popup-overlay,
+body.tv-scaled .error-popup-overlay,
+body.tv-scaled .confirm-popup-overlay,
+body.tv-scaled .admin-login-overlay {
+  width: var(--tv-stage-width, 1360px) !important;
+  height: var(--tv-stage-height, 760px) !important;
+}
 
+body.tv-device.dark-mode,
+body.tv-studio-active.dark-mode {
+  background-color: #030612 !important;
+  background-image: radial-gradient(circle at 50% 10%, #0a1433 0%, #040714 70%, #010309 100%) !important;
+  color: #f8fafc !important;
+}
 
+body.tv-device.dark-mode .board-container,
+body.tv-device.dark-mode .card,
+body.tv-device.dark-mode .montepremi-container,
+body.tv-device.dark-mode .vincite-container-large,
+body.tv-device.dark-mode .jackpot-container,
+body.tv-device.dark-mode .countdown-container,
+body.tv-device.dark-mode .vertical-controls,
+body.tv-device.dark-mode .box-b-container,
+body.tv-device.dark-mode nav,
+body.tv-studio-active.dark-mode .board-container,
+body.tv-studio-active.dark-mode .card,
+body.tv-studio-active.dark-mode .montepremi-container,
+body.tv-studio-active.dark-mode .vincite-container-large,
+body.tv-studio-active.dark-mode .jackpot-container,
+body.tv-studio-active.dark-mode .countdown-container,
+body.tv-studio-active.dark-mode .vertical-controls,
+body.tv-studio-active.dark-mode .box-b-container,
+body.tv-studio-active.dark-mode nav {
+  background-color: #0c1636 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
 
+body.tv-studio-active {
+  padding: 10px 16px !important;
+}
 
+#fullscreenBtn.tv-active {
+  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+  border-color: #fef08a !important;
+  color: #0f172a !important;
+  font-weight: 800 !important;
+  box-shadow: 0 0 14px rgba(250, 204, 21, 0.55) !important;
+}
+
+body.tv-device button:focus-visible,
+body.tv-device a:focus-visible,
+body.tv-device input:focus-visible,
+body.tv-studio-active button:focus-visible,
+body.tv-studio-active a:focus-visible {
+  outline: 3px solid #facc15 !important;
+  outline-offset: 2px;
+}

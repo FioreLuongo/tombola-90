@@ -39,7 +39,7 @@ export class ServerPersistentDb {
 
   private createDefaultPayload(): PersistedServerDbPayload {
     return {
-      bank: buildEmptyJackpotBank('€'),
+      bank: buildEmptyJackpotBank('£'),
       history: [],
       regiaConfig: null,
       tavoloSets: {},
@@ -113,7 +113,7 @@ export class ServerPersistentDb {
     return this.getBank();
   }
 
-  public saveCurrentGameUnclaimed(currentGameUnclaimed: number, currency: string = '€'): JackpotBankData {
+  public saveCurrentGameUnclaimed(currentGameUnclaimed: number, currency: string = '£'): JackpotBankData {
     const safeCurrent =
       Number.isFinite(currentGameUnclaimed) && currentGameUnclaimed >= 0
         ? Math.round(currentGameUnclaimed * 100) / 100
@@ -130,7 +130,7 @@ export class ServerPersistentDb {
 
   public depositUnclaimed(
     amount: number,
-    currency: string = '€',
+    currency: string = '£',
     prizeCategory: string = 'all',
     gameId: string = 'TOM001',
     note: string = 'Deposito montepremi non vinti'

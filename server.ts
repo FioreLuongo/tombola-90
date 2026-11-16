@@ -27,6 +27,12 @@ interface ServerGameState {
   prizePool: number;
   unclaimedPot: number;
   currency: string;
+  colors: {
+    blue: boolean;
+    orange: boolean;
+    green: boolean;
+    yellow: boolean;
+  };
   cartelleWins: Record<string, any>;
   tvGraphics: {
     enabled: boolean;
@@ -51,7 +57,13 @@ function createDefaultGameState(): ServerGameState {
     goldExpired: false,
     prizePool: 0,
     unclaimedPot: 0,
-    currency: '€',
+    currency: '£',
+    colors: {
+      blue: false,
+      orange: false,
+      green: false,
+      yellow: false,
+    },
     cartelleWins: {
       ambo: { won: false, cartellaId: null, count: 0 },
       terno: { won: false, cartellaId: null, count: 0 },
@@ -255,6 +267,23 @@ wss.on('connection', (ws: WebSocket, req) => {
           }
           break;
 
+        case 'UPDATE_COLORS':
+          if (msg.colors && typeof msg.colors === 'object') {
+            currentGameState.colors = {
+              blue: Boolean(msg.colors.blue),
+              orange: Boolean(msg.colors.orange),
+              green: Boolean(msg.colors.green),
+              yellow: Boolean(msg.colors.yellow),
+            };
+            currentGameState.updatedAt = Date.now();
+            broadcast({
+              type: 'COLORS_UPDATED',
+              colors: currentGameState.colors,
+              timestamp: Date.now()
+            }, ws);
+          }
+          break;
+
         case 'UPDATE_GRAPHICS':
           if (msg.tvGraphics) {
             currentGameState.tvGraphics = {
@@ -363,7 +392,7 @@ app.get('/api/db/bank', (req, res) => {
 
 app.put('/api/db/current-unclaimed', (req, res) => {
   const { currentGameUnclaimed, currency } = req.body || {};
-  const bank = serverDb.saveCurrentGameUnclaimed(Number(currentGameUnclaimed) || 0, currency || '€');
+  const bank = serverDb.saveCurrentGameUnclaimed(Number(currentGameUnclaimed) || 0, currency || '£');
   res.json({ ok: true, bank });
 });
 

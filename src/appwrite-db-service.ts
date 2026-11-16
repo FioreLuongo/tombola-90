@@ -113,7 +113,7 @@ export function mapAppwriteDocToJackpotBank(docData: Record<string, any> | null 
   return sanitizeJackpotBankData({
     accumulatedUnclaimed: Number(docData.accumulatedUnclaimed) || 0,
     currentGameUnclaimed: Number(docData.currentGameUnclaimed) || 0,
-    currency: typeof docData.currency === 'string' ? docData.currency : '€',
+    currency: typeof docData.currency === 'string' ? docData.currency : '£',
     lastUpdated: typeof docData.lastUpdated === 'string' ? docData.lastUpdated : new Date().toISOString(),
     totalGamesRecorded: Number(docData.totalGamesRecorded) || 0,
   });
@@ -422,7 +422,7 @@ async function appendAppwriteHistory(entry: Omit<UnclaimedHistoryEntry, 'id'>): 
 
 export async function saveCurrentGameUnclaimedToAppwrite(
   currentGameUnclaimed: number,
-  currency: string = '€'
+  currency: string = '£'
 ): Promise<{ success: boolean; bank?: JackpotBankData; error?: string }> {
   if (!isAppwriteConfigured(activeConfig)) return { success: false, error: 'Appwrite non configurato' };
   const currentRes = await getAppwriteJackpotBank();
@@ -449,7 +449,7 @@ export async function saveCurrentGameUnclaimedToAppwrite(
 
 export async function depositUnclaimedToAppwrite(
   amount: number,
-  currency: string = '€',
+  currency: string = '£',
   prizeCategory: string = 'all',
   gameId: string = 'TOM001',
   note: string = 'Deposito montepremi non vinti'

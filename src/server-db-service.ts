@@ -85,7 +85,7 @@ export async function syncServerDbSnapshot(bank: JackpotBankData): Promise<{ ok:
 
 export async function saveCurrentGameUnclaimedToServerDb(
   currentGameUnclaimed: number,
-  currency: string = '€'
+  currency: string = '£'
 ): Promise<{ success: boolean; bank?: JackpotBankData }> {
   const res = await fetchJsonSafe<{ ok?: boolean; bank?: JackpotBankData }>('/api/db/current-unclaimed', {
     method: 'PUT',
@@ -97,7 +97,7 @@ export async function saveCurrentGameUnclaimedToServerDb(
 
 export async function depositUnclaimedToServerDb(
   amount: number,
-  currency: string = '€',
+  currency: string = '£',
   prizeCategory: string = 'all',
   gameId: string = 'TOM001',
   note: string = 'Deposito montepremi non vinti'
