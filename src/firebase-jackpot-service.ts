@@ -46,6 +46,7 @@ export interface FirestoreErrorInfo {
 
 export interface JackpotBankData {
   accumulatedUnclaimed: number;
+  currentGameUnclaimed: number;
   currency: string;
   lastUpdated: string;
   totalGamesRecorded: number;
@@ -101,7 +102,7 @@ export const DEFAULT_REGIA_PROFILES: RegiaProfileData[] = [
     delayMaxTerno: 35,
     delayMaxQuaterna: 50,
     delayMaxCinquina: 65,
-    delayMaxTombola: 85,
+    delayMaxTombola: 90,
     updatedAt: '2026-01-01T00:00:00.000Z',
   },
   {
@@ -120,7 +121,7 @@ export const DEFAULT_REGIA_PROFILES: RegiaProfileData[] = [
     delayMaxTerno: 40,
     delayMaxQuaterna: 55,
     delayMaxCinquina: 70,
-    delayMaxTombola: 86,
+    delayMaxTombola: 90,
     updatedAt: '2026-01-01T00:00:00.000Z',
   },
   {
@@ -139,7 +140,7 @@ export const DEFAULT_REGIA_PROFILES: RegiaProfileData[] = [
     delayMaxTerno: 45,
     delayMaxQuaterna: 60,
     delayMaxCinquina: 75,
-    delayMaxTombola: 88,
+    delayMaxTombola: 90,
     updatedAt: '2026-01-01T00:00:00.000Z',
   },
   {
@@ -158,13 +159,14 @@ export const DEFAULT_REGIA_PROFILES: RegiaProfileData[] = [
     delayMaxTerno: 35,
     delayMaxQuaterna: 50,
     delayMaxCinquina: 65,
-    delayMaxTombola: 85,
+    delayMaxTombola: 90,
     updatedAt: '2026-01-01T00:00:00.000Z',
   },
 ];
 
 const PROFILES_LOCAL_CACHE_KEY = 'tombola_regia_profiles_cache_v1';
 const ACTIVE_PROFILE_LOCAL_KEY = 'tombola_regia_active_profile_v1';
+export const JACKPOT_BANK_LOCAL_CACHE_KEY = 'tombola_jackpot_bank_cache_v1';
 
 let db: Firestore | null = null;
 let authInstance: ReturnType<typeof getAuth> | null = null;
@@ -233,7 +235,7 @@ function sanitizeRegiaProfile(input: Partial<RegiaProfileData> & { id: string })
     delayMaxTerno: clampThreshold(input.delayMaxTerno, 5, 90, 35),
     delayMaxQuaterna: clampThreshold(input.delayMaxQuaterna, 5, 90, 50),
     delayMaxCinquina: clampThreshold(input.delayMaxCinquina, 5, 90, 65),
-    delayMaxTombola: clampThreshold(input.delayMaxTombola, 5, 90, 85),
+    delayMaxTombola: clampThreshold(input.delayMaxTombola, 5, 90, 90),
     updatedAt: new Date().toISOString(),
   };
 }
@@ -293,11 +295,62 @@ export function isFirebaseConnected(): boolean {
 
 const BANK_DOC_ID = 'main';
 
+const ALLOWED_CURRENCIES = new Set(['€', '£', '$']);
+
+function sanitizeCurrency(rawCurrency: unknown): string {
+  const trimmed = typeof rawCurrency === 'string' ? rawCurrency.trim() : '';
+  return ALLOWED_CURRENCIES.has(trimmed) ? trimmed : '€';
+}
+
+export function buildEmptyJackpotBank(currency: string = '€'): JackpotBankData {
+  return {
+    accumulatedUnclaimed: 0,
+    currentGameUnclaimed: 0,
+    currency: sanitizeCurrency(currency),
+    lastUpdated: new Date().toISOString(),
+    totalGamesRecorded: 0,
+  };
+}
+
+export function sanitizeJackpotBankData(raw: Partial<JackpotBankData> | null | undefined): JackpotBankData {
+  const acc = Number(raw?.accumulatedUnclaimed);
+  const cur = Number(raw?.currentGameUnclaimed);
+  const games = Number(raw?.totalGamesRecorded);
+  const currStr = sanitizeCurrency(raw?.currency);
+  return {
+    accumulatedUnclaimed: Number.isFinite(acc) && acc >= 0 ? Math.round(acc * 100) / 100 : 0,
+    currentGameUnclaimed: Number.isFinite(cur) && cur >= 0 ? Math.round(cur * 100) / 100 : 0,
+    currency: currStr,
+    lastUpdated: typeof raw?.lastUpdated === 'string' && raw.lastUpdated ? raw.lastUpdated : new Date().toISOString(),
+    totalGamesRecorded: Number.isFinite(games) && games >= 0 ? Math.round(games) : 0,
+  };
+}
+
+export function readJackpotBankCache(): JackpotBankData {
+  try {
+    const raw = localStorage.getItem(JACKPOT_BANK_LOCAL_CACHE_KEY);
+    if (raw) {
+      return sanitizeJackpotBankData(JSON.parse(raw));
+    }
+  } catch {
+    // Ignore storage error
+  }
+  return buildEmptyJackpotBank();
+}
+
+export function writeJackpotBankCache(bank: JackpotBankData): void {
+  try {
+    localStorage.setItem(JACKPOT_BANK_LOCAL_CACHE_KEY, JSON.stringify(sanitizeJackpotBankData(bank)));
+  } catch {
+    // Ignore storage error
+  }
+}
+
 export async function getJackpotBank(): Promise<JackpotBankData> {
   if (!db) {
     const ok = await initFirebaseJackpot();
     if (!ok || !db) {
-      return { accumulatedUnclaimed: 0, currency: '€', lastUpdated: new Date().toISOString(), totalGamesRecorded: 0 };
+      return readJackpotBankCache();
     }
   }
 
@@ -306,21 +359,13 @@ export async function getJackpotBank(): Promise<JackpotBankData> {
     const bankDocRef = doc(db, 'jackpot_bank', BANK_DOC_ID);
     const snap = await getDoc(bankDocRef);
     if (snap.exists()) {
-      const data = snap.data() as JackpotBankData;
-      return {
-        accumulatedUnclaimed: Number(data.accumulatedUnclaimed) || 0,
-        currency: data.currency || '€',
-        lastUpdated: data.lastUpdated || new Date().toISOString(),
-        totalGamesRecorded: Number(data.totalGamesRecorded) || 0,
-      };
+      const sanitized = sanitizeJackpotBankData(snap.data() as Partial<JackpotBankData>);
+      writeJackpotBankCache(sanitized);
+      return sanitized;
     } else {
-      const initial: JackpotBankData = {
-        accumulatedUnclaimed: 0,
-        currency: '€',
-        lastUpdated: new Date().toISOString(),
-        totalGamesRecorded: 0,
-      };
+      const initial = buildEmptyJackpotBank();
       await setDoc(bankDocRef, initial);
+      writeJackpotBankCache(initial);
       return initial;
     }
   } catch (err) {
@@ -330,7 +375,7 @@ export async function getJackpotBank(): Promise<JackpotBankData> {
     } catch {
       // Return safe fallback after structured error log
     }
-    return { accumulatedUnclaimed: 0, currency: '€', lastUpdated: new Date().toISOString(), totalGamesRecorded: 0 };
+    return readJackpotBankCache();
   }
 }
 
@@ -347,13 +392,9 @@ export function subscribeToJackpotBank(callback: (bank: JackpotBankData) => void
     bankDocRef,
     (snap) => {
       if (snap.exists()) {
-        const data = snap.data() as JackpotBankData;
-        callback({
-          accumulatedUnclaimed: Number(data.accumulatedUnclaimed) || 0,
-          currency: data.currency || '€',
-          lastUpdated: data.lastUpdated || new Date().toISOString(),
-          totalGamesRecorded: Number(data.totalGamesRecorded) || 0,
-        });
+        const sanitized = sanitizeJackpotBankData(snap.data() as Partial<JackpotBankData>);
+        writeJackpotBankCache(sanitized);
+        callback(sanitized);
       }
     },
     (err) => {
@@ -364,6 +405,49 @@ export function subscribeToJackpotBank(callback: (bank: JackpotBankData) => void
       }
     }
   );
+}
+
+export async function saveCurrentGameUnclaimedToFirestore(
+  currentGameUnclaimed: number,
+  currency: string = '€'
+): Promise<{ success: boolean; bank: JackpotBankData; error?: string }> {
+  const safeCurrent = Number.isFinite(currentGameUnclaimed) && currentGameUnclaimed >= 0
+    ? Math.round(currentGameUnclaimed * 100) / 100
+    : 0;
+
+  const cached = readJackpotBankCache();
+  const optimistic: JackpotBankData = {
+    ...cached,
+    currentGameUnclaimed: safeCurrent,
+    currency: currency || cached.currency,
+    lastUpdated: new Date().toISOString(),
+  };
+  writeJackpotBankCache(optimistic);
+
+  if (!db) await initFirebaseJackpot();
+  if (!db) return { success: false, bank: optimistic, error: 'Database Firestore non collegato' };
+
+  const path = `jackpot_bank/${BANK_DOC_ID}`;
+  try {
+    const bankDocRef = doc(db, 'jackpot_bank', BANK_DOC_ID);
+    const currentBank = await getJackpotBank();
+    const updatedBank: JackpotBankData = {
+      ...currentBank,
+      currentGameUnclaimed: safeCurrent,
+      currency: currency || currentBank.currency,
+      lastUpdated: new Date().toISOString(),
+    };
+    await setDoc(bankDocRef, updatedBank, { merge: true });
+    writeJackpotBankCache(updatedBank);
+    return { success: true, bank: updatedBank };
+  } catch (err: any) {
+    try {
+      handleFirestoreError(err, OperationType.WRITE, path);
+    } catch {
+      // Logged in structured format
+    }
+    return { success: false, bank: optimistic, error: err?.message || 'Errore salvataggio non vinti partita attuale' };
+  }
 }
 
 export async function saveUnclaimedToDatabase(
@@ -389,12 +473,14 @@ export async function saveUnclaimedToDatabase(
 
     const updatedBank: JackpotBankData = {
       accumulatedUnclaimed: newBalance,
+      currentGameUnclaimed: 0,
       currency: currency || currentBank.currency,
       lastUpdated: new Date().toISOString(),
       totalGamesRecorded: currentBank.totalGamesRecorded + 1,
     };
 
     await setDoc(bankDocRef, updatedBank, { merge: true });
+    writeJackpotBankCache(updatedBank);
 
     const ledgerRef = collection(db, 'unclaimed_history');
     await addDoc(ledgerRef, {
@@ -449,12 +535,14 @@ export async function recallUnclaimedIntoGame(
 
     const updatedBank: JackpotBankData = {
       accumulatedUnclaimed: remainingBalance,
+      currentGameUnclaimed: currentBank.currentGameUnclaimed,
       currency: currentBank.currency,
       lastUpdated: new Date().toISOString(),
       totalGamesRecorded: currentBank.totalGamesRecorded,
     };
 
     await setDoc(bankDocRef, updatedBank, { merge: true });
+    writeJackpotBankCache(updatedBank);
 
     const ledgerRef = collection(db, 'unclaimed_history');
     await addDoc(ledgerRef, {
@@ -492,12 +580,14 @@ export async function resetJackpotBank(
 
     const updatedBank: JackpotBankData = {
       accumulatedUnclaimed: 0,
+      currentGameUnclaimed: currentBank.currentGameUnclaimed,
       currency: currentBank.currency,
       lastUpdated: new Date().toISOString(),
       totalGamesRecorded: currentBank.totalGamesRecorded,
     };
 
     await setDoc(bankDocRef, updatedBank, { merge: true });
+    writeJackpotBankCache(updatedBank);
 
     const ledgerRef = collection(db, 'unclaimed_history');
     await addDoc(ledgerRef, {

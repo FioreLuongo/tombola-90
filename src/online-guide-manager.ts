@@ -1,4 +1,5 @@
 import { ONLINE_GUIDE_PDF_BASE64 } from './guide-pdf-data';
+import { APPWRITE_GUIDE_PDF_BASE64 } from './appwrite-guide-pdf-data';
 
 /**
  * Gestore Ufficiale della Guida Messa Online e Download PDF/ZIP
@@ -70,18 +71,15 @@ function showToastNotification(title: string, message: string, icon = 'fas fa-ch
   }, 7000);
 }
 
-/**
- * Scarica la guida in PDF convertendo la costante Base64 in un Blob binario.
- * Non passa per HTTP proxy ed evita qualsiasi danneggiamento del file.
- */
-export function downloadOnlineGuidePDF(e?: Event) {
-  if (e) {
-    e.preventDefault();
-    e.stopPropagation();
-  }
-
+function triggerBase64PdfDownload(
+  base64Data: string,
+  fileName: string,
+  fallbackPublicPath: string,
+  toastMessage: string
+) {
   try {
-    const binaryString = window.atob(ONLINE_GUIDE_PDF_BASE64);
+    const cleanBase64 = base64Data.replace(/\s+/g, '');
+    const binaryString = window.atob(cleanBase64);
     const len = binaryString.length;
     const bytes = new Uint8Array(len);
     for (let i = 0; i < len; i++) {
@@ -93,33 +91,69 @@ export function downloadOnlineGuidePDF(e?: Event) {
 
     const downloadLink = document.createElement('a');
     downloadLink.href = blobUrl;
-    downloadLink.download = 'Guida_Messa_Online_GitHub_Hosting.pdf';
+    downloadLink.download = fileName;
+    downloadLink.rel = 'noopener';
     document.body.appendChild(downloadLink);
     downloadLink.click();
     document.body.removeChild(downloadLink);
 
     setTimeout(() => {
       URL.revokeObjectURL(blobUrl);
-    }, 15000);
+    }, 30000);
 
     showToastNotification(
       'Download PDF Avviato!',
-      'Il file <b>Guida_Messa_Online_GitHub_Hosting.pdf</b> è stato generato in formato binario originale (100% integro e compatibile con Adobe Acrobat Reader).',
+      toastMessage,
       'fas fa-file-pdf',
       '#38bdf8'
     );
   } catch (error) {
     console.error('Errore generazione Blob PDF:', error);
-    // Fallback diretto al file statico su disco
     const baseUrl = import.meta.env.BASE_URL || '/';
     const fallbackLink = document.createElement('a');
-    fallbackLink.href = `${baseUrl}Guida_Messa_Online_GitHub_Hosting.pdf`;
-    fallbackLink.download = 'Guida_Messa_Online_GitHub_Hosting.pdf';
-    fallbackLink.target = '_self';
+    fallbackLink.href = `${baseUrl}${fallbackPublicPath.replace(/^\/+/, '')}`;
+    fallbackLink.download = fileName;
+    fallbackLink.target = '_blank';
+    fallbackLink.rel = 'noopener';
     document.body.appendChild(fallbackLink);
     fallbackLink.click();
     document.body.removeChild(fallbackLink);
   }
+}
+
+/**
+ * Scarica la guida in PDF convertendo la costante Base64 in un Blob binario.
+ * Non passa per HTTP proxy ed evita qualsiasi danneggiamento del file.
+ */
+export function downloadOnlineGuidePDF(e?: Event) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  triggerBase64PdfDownload(
+    ONLINE_GUIDE_PDF_BASE64,
+    'Guida_Messa_Online_GitHub_Hosting.pdf',
+    'Guida_Messa_Online_GitHub_Hosting.pdf',
+    'Il file <b>Guida_Messa_Online_GitHub_Hosting.pdf</b> è stato generato in formato binario originale (100% integro e compatibile con Adobe Acrobat Reader).'
+  );
+}
+
+/**
+ * Scarica la guida configurazione Appwrite in PDF convertendo la costante Base64 in un Blob binario.
+ */
+export function downloadAppwriteGuidePDF(e?: Event) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  triggerBase64PdfDownload(
+    APPWRITE_GUIDE_PDF_BASE64,
+    'Guida_Configurazione_Appwrite_Tombola90.pdf',
+    'Guida_Configurazione_Appwrite_Tombola90.pdf',
+    'Il file <b>Guida_Configurazione_Appwrite_Tombola90.pdf</b> (3 pagine A4) è pronto ed integro in formato binario PDF classico per Adobe Acrobat Reader.'
+  );
 }
 
 /**
@@ -210,6 +244,32 @@ export function closeOnlineGuideModal(e?: Event) {
   }
 }
 
+export function openAppwriteGuideModal(e?: Event) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  const modal = document.getElementById('appwriteGuideModal');
+  if (modal) {
+    modal.style.display = 'flex';
+    document.body.classList.add('appwrite-guide-modal-open');
+  }
+}
+
+export function closeAppwriteGuideModal(e?: Event) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  const modal = document.getElementById('appwriteGuideModal');
+  if (modal) {
+    modal.style.display = 'none';
+    document.body.classList.remove('appwrite-guide-modal-open');
+  }
+}
+
 /**
  * Avvia la stampa nativa del browser (ottimizzata A4 tramite @media print)
  */
@@ -229,9 +289,12 @@ export function initOnlineGuideManager() {
   // Esponi le funzioni su window per compatibilità immediata
   const w = window as any;
   w.downloadOnlineGuidePDF = downloadOnlineGuidePDF;
+  w.downloadAppwriteGuidePDF = downloadAppwriteGuidePDF;
   w.downloadProjectZip = downloadProjectZip;
   w.openOnlineGuideModal = openOnlineGuideModal;
   w.closeOnlineGuideModal = closeOnlineGuideModal;
+  w.openAppwriteGuideModal = openAppwriteGuideModal;
+  w.closeAppwriteGuideModal = closeAppwriteGuideModal;
   w.printOnlineGuide = printOnlineGuide;
 
   // Collega i bottoni nel DOM
@@ -247,6 +310,16 @@ export function initOnlineGuideManager() {
   bindBtn('regiaDownloadGuidePdfBtn', downloadOnlineGuidePDF);
   bindBtn('regiaOpenGuideModalBtn', openOnlineGuideModal);
   bindBtn('regiaDownloadCodeZipBtn', downloadProjectZip);
+
+  // Bottoni Guida Appwrite (Dual-DB Modal + Modale Guida Appwrite)
+  bindBtn('downloadAppwritePdfBtn', downloadAppwriteGuidePDF);
+  bindBtn('openAppwriteGuideModalBtn', openAppwriteGuideModal);
+  bindBtn('closeAppwriteGuideModalBtn', closeAppwriteGuideModal);
+  bindBtn('appwriteModalCloseHeaderBtn', closeAppwriteGuideModal);
+  bindBtn('appwriteModalDownloadPdfBtn', downloadAppwriteGuidePDF);
+  bindBtn('appwriteModalDownloadFooterBtn', downloadAppwriteGuidePDF);
+  bindBtn('appwriteModalPrintGuideBtn', printOnlineGuide);
+  bindBtn('appwriteModalPrintFooterBtn', printOnlineGuide);
 
   // Bottoni all'interno della modale
   bindBtn('closeOnlineGuideModalBtn', closeOnlineGuideModal);
@@ -267,9 +340,23 @@ export function initOnlineGuideManager() {
     });
   }
 
+  const appwriteModal = document.getElementById('appwriteGuideModal');
+  if (appwriteModal) {
+    appwriteModal.addEventListener('click', (e) => {
+      if (e.target === appwriteModal) {
+        closeAppwriteGuideModal();
+      }
+    });
+  }
+
   // Supporto tasto Escape
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+      const awModal = document.getElementById('appwriteGuideModal');
+      if (awModal && awModal.style.display !== 'none') {
+        closeAppwriteGuideModal();
+        return;
+      }
       const m = document.getElementById('onlineGuideModal');
       if (m && m.style.display !== 'none') {
         closeOnlineGuideModal();

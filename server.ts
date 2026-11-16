@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
+import { ServerPersistentDb } from './server-db';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,37 +39,39 @@ interface ServerGameState {
   updatedAt: number;
 }
 
-const defaultGameState: ServerGameState = {
-  extractedNumbers: [],
-  currentNumber: null,
-  extractionCount: 0,
-  isTimerRunning: false,
-  timerIntervalSeconds: 3,
-  numeroGold: null,
-  goldWon: false,
-  goldExpired: false,
-  prizePool: 0,
-  unclaimedPot: 0,
-  currency: '€',
-  cartelleWins: {
-    ambo: { won: false, cartellaId: null, count: 0 },
-    terno: { won: false, cartellaId: null, count: 0 },
-    quaterna: { won: false, cartellaId: null, count: 0 },
-    cinquina: { won: false, cartellaId: null, count: 0 },
-    tombola: { won: false, cartellaId: null, count: 0, gameEnded: false }
-  },
-  tvGraphics: {
-    enabled: false,
-    showTicker: true,
-    tickerText: '★ TOMBOLA 90 GOLD EDITION • DIRETTA LIVE STUDIO TV ★',
-    theme: 'luxury-gold',
-    sponsorLogo: ''
-  },
-  lastEvent: 'INIT',
-  updatedAt: Date.now()
-};
+function createDefaultGameState(): ServerGameState {
+  return {
+    extractedNumbers: [],
+    currentNumber: null,
+    extractionCount: 0,
+    isTimerRunning: false,
+    timerIntervalSeconds: 3,
+    numeroGold: null,
+    goldWon: false,
+    goldExpired: false,
+    prizePool: 0,
+    unclaimedPot: 0,
+    currency: '€',
+    cartelleWins: {
+      ambo: { won: false, cartellaId: null, count: 0 },
+      terno: { won: false, cartellaId: null, count: 0 },
+      quaterna: { won: false, cartellaId: null, count: 0 },
+      cinquina: { won: false, cartellaId: null, count: 0 },
+      tombola: { won: false, cartellaId: null, count: 0, gameEnded: false }
+    },
+    tvGraphics: {
+      enabled: false,
+      showTicker: true,
+      tickerText: '★ TOMBOLA 90 GOLD EDITION • DIRETTA LIVE STUDIO TV ★',
+      theme: 'luxury-gold',
+      sponsorLogo: ''
+    },
+    lastEvent: 'INIT',
+    updatedAt: Date.now()
+  };
+}
 
-let currentGameState: ServerGameState = { ...defaultGameState };
+let currentGameState: ServerGameState = createDefaultGameState();
 
 // Initialize WebSocket Server safely via noServer to avoid conflicting with other upgrade paths
 // perMessageDeflate: false avoids proxy negotiation failures on Cloud Run / reverse proxies
@@ -190,10 +193,11 @@ wss.on('connection', (ws: WebSocket, req) => {
 
         case 'REGIA_RESET_GAME':
           currentGameState = {
-            ...defaultGameState,
+            ...createDefaultGameState(),
             unclaimedPot: msg.preserveUnclaimed ? currentGameState.unclaimedPot : 0,
-            prizePool: msg.prizePool || currentGameState.prizePool,
+            prizePool: msg.prizePool || 0,
             currency: msg.currency || currentGameState.currency,
+            tvGraphics: currentGameState.tvGraphics,
             lastEvent: 'RESET_GAME',
             updatedAt: Date.now()
           };
@@ -324,7 +328,8 @@ wss.on('close', () => {
 });
 
 // Setup Express Middlewares & Routes
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
+const serverDb = new ServerPersistentDb();
 
 // API Status endpoint
 app.get('/api/health', (_req, res) => {
@@ -340,6 +345,90 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
+// Zero-Config Built-In Persistent Server Database API (/api/db/*)
+app.get('/api/db/status', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(serverDb.getStatus());
+});
+
+app.get('/api/db/bank', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const limit = Number(req.query.limit) || 8;
+  res.json({
+    ok: true,
+    bank: serverDb.getBank(),
+    history: serverDb.getHistory(limit),
+  });
+});
+
+app.put('/api/db/current-unclaimed', (req, res) => {
+  const { currentGameUnclaimed, currency } = req.body || {};
+  const bank = serverDb.saveCurrentGameUnclaimed(Number(currentGameUnclaimed) || 0, currency || '€');
+  res.json({ ok: true, bank });
+});
+
+app.post('/api/db/bank/sync', (req, res) => {
+  const bank = serverDb.syncBankSnapshot(req.body || {});
+  res.json({ ok: true, bank });
+});
+
+app.post('/api/db/deposit', (req, res) => {
+  const { amount, currency, prizeCategory, gameId, note } = req.body || {};
+  const result = serverDb.depositUnclaimed(Number(amount) || 0, currency, prizeCategory, gameId, note);
+  res.json(result);
+});
+
+app.post('/api/db/recall', (req, res) => {
+  const { amountToRecall, gameId, note } = req.body || {};
+  const parsedAmount = amountToRecall === null || amountToRecall === undefined ? null : Number(amountToRecall);
+  const result = serverDb.recallUnclaimed(parsedAmount, gameId, note);
+  res.json(result);
+});
+
+app.post('/api/db/reset', (req, res) => {
+  const { gameId, note } = req.body || {};
+  const result = serverDb.resetBank(gameId, note);
+  res.json(result);
+});
+
+app.get('/api/db/regia-config', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ ok: true, config: serverDb.getRegiaConfig() });
+});
+
+app.put('/api/db/regia-config', (req, res) => {
+  const config = serverDb.saveRegiaConfig(req.body || {});
+  res.json({ ok: true, config });
+});
+
+app.get('/api/db/tavolo-sets', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ ok: true, sets: serverDb.listTavoloSets() });
+});
+
+app.get('/api/db/tavolo-sets/:setId', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const set = serverDb.getTavoloSet(req.params.setId);
+  res.json({ ok: true, found: Boolean(set), set });
+});
+
+app.put('/api/db/tavolo-sets/:setId', (req, res) => {
+  const body = req.body || {};
+  const saved = serverDb.saveTavoloSet({ ...body, id: req.params.setId, gameId: body.gameId || req.params.setId });
+  if (!saved) {
+    res.status(400).json({ ok: false, error: 'Dati sezione Tavolo non validi' });
+    return;
+  }
+  res.json({ ok: true, set: saved });
+});
+
+app.patch('/api/db/tavolo-sets/:setId/active-sheets', (req, res) => {
+  const activeSheets = Array.isArray(req.body?.activeSheets) ? req.body.activeSheets : [];
+  const updatedAt = typeof req.body?.updatedAt === 'string' ? req.body.updatedAt : undefined;
+  const result = serverDb.updateTavoloActiveSheets(req.params.setId, activeSheets, updatedAt);
+  res.json({ ok: result.success, activeSheets: result.activeSheets });
+});
+
 // Vite Middleware for Development or Static Serving for Production
 async function startServer() {
   if (!isProduction) {
@@ -353,7 +442,11 @@ async function startServer() {
   } else {
     const distPath = path.resolve(__dirname, 'dist');
     app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
+    app.get('*', (req, res) => {
+      if (/\.(pdf|zip|js|css|png|jpg|jpeg|svg|ico|webp|woff2?|json)$/i.test(req.path)) {
+        res.status(404).type('text/plain').send('File statico non trovato');
+        return;
+      }
       res.sendFile(path.join(distPath, 'index.html'));
     });
     console.log(`[Server] Serviti file statici da ${distPath} in produzione.`);

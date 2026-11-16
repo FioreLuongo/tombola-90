@@ -8,6 +8,7 @@ build/
 # Testing & Coverage
 coverage/
 .playwright-cli/
+.data/
 
 # Environment files
 .env.local

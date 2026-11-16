@@ -82,8 +82,32 @@ service cloud.firestore {
              && data.prizes.keys().hasAll(['prizePool', 'currency'])
              && data.prizes.keys().hasOnly(['prizePool', 'currency'])
              && (data.prizes.prizePool is int || data.prizes.prizePool is float)
-             && data.prizes.prizePool >= 0 && data.prizes.prizePool <= 100000000
-             && data.prizes.currency is string && data.prizes.currency.size() >= 1 && data.prizes.currency.size() <= 8;
+              && data.prizes.prizePool >= 0 && data.prizes.prizePool <= 100000000
+              && data.prizes.currency is string && data.prizes.currency.size() >= 1 && data.prizes.currency.size() <= 8;
+    }
+
+    function isValidTavoloSetMeta(data) {
+      return data.keys().hasAll(['id', 'gameId', 'name', 'totalSheets', 'activeSheets', 'createdAt', 'updatedAt'])
+             && data.keys().hasOnly(['id', 'gameId', 'name', 'totalSheets', 'activeSheets', 'createdAt', 'updatedAt'])
+             && isValidId(data.id)
+             && isValidId(data.gameId)
+             && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
+             && data.totalSheets is int && data.totalSheets >= 1 && data.totalSheets <= 100
+             && data.activeSheets is list && data.activeSheets.size() <= 100
+             && data.createdAt is string && data.createdAt.size() >= 10 && data.createdAt.size() <= 40
+             && data.updatedAt is string && data.updatedAt.size() >= 10 && data.updatedAt.size() <= 40;
+    }
+
+    function isValidTavoloSheetDoc(data, setId) {
+      return data.keys().hasAll(['id', 'setId', 'gameId', 'sheetNumber', 'sheetLabel', 'cards', 'updatedAt'])
+             && data.keys().hasOnly(['id', 'setId', 'gameId', 'sheetNumber', 'sheetLabel', 'cards', 'updatedAt'])
+             && isValidId(data.id)
+             && isValidId(data.setId) && data.setId == setId
+             && isValidId(data.gameId)
+             && data.sheetNumber is int && data.sheetNumber >= 1 && data.sheetNumber <= 100
+             && data.sheetLabel is string && data.sheetLabel.size() >= 1 && data.sheetLabel.size() <= 10
+             && data.cards is list && data.cards.size() == 24
+             && data.updatedAt is string && data.updatedAt.size() >= 10 && data.updatedAt.size() <= 40;
     }
 
     // Test connection document
@@ -91,12 +115,15 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    // Cumulative jackpot bank for rollover prizes
+    // Cumulative jackpot bank + active game unclaimed prizes
     match /jackpot_bank/{bankId} {
       allow read: if isValidId(bankId);
       allow write: if isValidId(bankId)
                    && request.resource.data.accumulatedUnclaimed is number
                    && request.resource.data.accumulatedUnclaimed >= 0
+                   && (!('currentGameUnclaimed' in request.resource.data)
+                       || (request.resource.data.currentGameUnclaimed is number
+                           && request.resource.data.currentGameUnclaimed >= 0))
                    && request.resource.data.currency is string
                    && request.resource.data.currency.size() <= 8;
     }
@@ -134,6 +161,25 @@ service cloud.firestore {
                             && isValidRegiaGameConfig(request.resource.data)
                             && request.resource.data.id == configId;
       allow delete: if false;
+    }
+
+    // Permanent table game card sets (e.g. TAV-G001) and active sheet selection
+    match /tavolo_sets/{setId} {
+      allow read: if true;
+      allow create, update: if isValidId(setId)
+                            && isValidTavoloSetMeta(request.resource.data)
+                            && request.resource.data.id == setId
+                            && request.resource.data.gameId == setId;
+      allow delete: if false;
+
+      match /sheets/{sheetId} {
+        allow read: if true;
+        allow create, update: if isValidId(setId) && isValidId(sheetId)
+                              && exists(/databases/$(database)/documents/tavolo_sets/$(setId))
+                              && isValidTavoloSheetDoc(request.resource.data, setId)
+                              && request.resource.data.id == sheetId;
+        allow delete: if false;
+      }
     }
   }
 }

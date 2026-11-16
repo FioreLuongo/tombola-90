@@ -3,7 +3,7 @@ import shutil
 import zipfile
 
 zip_filename = 'public/tombola-90-complete.zip'
-exclude_dirs = {'node_modules', 'dist', '.git', '.playwright-cli', '.aistudio'}
+exclude_dirs = {'node_modules', 'dist', '.git', '.playwright-cli', '.aistudio', '.data'}
 exclude_extensions = {'.png', '.zip'}
 
 with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:

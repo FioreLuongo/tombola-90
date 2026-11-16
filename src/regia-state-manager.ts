@@ -3,18 +3,10 @@ import {
   DEFAULT_REGIA_PROFILES,
   deleteRegiaProfile,
   getActiveRegiaProfileId,
-  getJackpotBank,
-  getRegiaGameConfig,
   getRegiaProfiles,
-  getUnclaimedHistory,
-  initFirebaseJackpot,
-  recallUnclaimedIntoGame,
-  resetJackpotBank,
   sanitizeProfileId,
   sanitizeRegiaGameConfig,
-  saveRegiaGameConfig,
   saveRegiaProfile,
-  saveUnclaimedToDatabase,
   setActiveRegiaProfileId,
   subscribeToActiveRegiaProfile,
   subscribeToJackpotBank,
@@ -26,6 +18,22 @@ import {
   type RegiaProfileData,
   type UnclaimedHistoryEntry,
 } from './firebase-jackpot-service';
+import {
+  buildDualDatabaseStatus,
+  depositDualUnclaimed,
+  getDualJackpotBankAndHistory,
+  getDualRegiaGameConfig,
+  initDualDatabases,
+  recallDualUnclaimed,
+  resetDualJackpotBank,
+  resolveDatabaseMode,
+  saveDatabaseMode,
+  saveDualCurrentGameUnclaimed,
+  saveDualRegiaGameConfig,
+  type AppwriteConfig,
+  type DatabaseMode,
+  type DualDatabaseStatus,
+} from './dual-database-service';
 import type { ConnectionStatus } from './realtime-sync';
 
 export type RegiaLogLevel = 'info' | 'win' | 'error' | 'warn' | 'success';
@@ -81,8 +89,14 @@ export interface RegiaStateSnapshot {
   };
   cloudBank: {
     connected: boolean;
+    firebaseConnected: boolean;
+    serverConnected: boolean;
+    appwriteConnected: boolean;
+    appwriteConfigured: boolean;
+    dbMode: DatabaseMode;
     statusLabel: string;
     balance: number;
+    currentGameUnclaimed: number;
     currency: string;
     lastUpdated: string;
     history: UnclaimedHistoryEntry[];
@@ -203,7 +217,7 @@ export function profileToEngineState(
     terno: { max: Number(profile.delayMaxTerno) || 35, expired: Boolean(currentDelays?.terno?.expired) },
     quaterna: { max: Number(profile.delayMaxQuaterna) || 50, expired: Boolean(currentDelays?.quaterna?.expired) },
     cinquina: { max: Number(profile.delayMaxCinquina) || 65, expired: Boolean(currentDelays?.cinquina?.expired) },
-    tombola: { max: Number(profile.delayMaxTombola) || 85, expired: Boolean(currentDelays?.tombola?.expired) },
+    tombola: { max: Number(profile.delayMaxTombola) || 90, expired: false },
   };
   const level = profile.difficultyLevel || 'custom';
   const enabled = Boolean(profile.enabled);
@@ -294,7 +308,7 @@ export function unifiedGameConfigToStatePatches(
     terno: { max: clean.thresholds.delayMaxTerno, expired: Boolean(currentDelays?.terno?.expired) },
     quaterna: { max: clean.thresholds.delayMaxQuaterna, expired: Boolean(currentDelays?.quaterna?.expired) },
     cinquina: { max: clean.thresholds.delayMaxCinquina, expired: Boolean(currentDelays?.cinquina?.expired) },
-    tombola: { max: clean.thresholds.delayMaxTombola, expired: Boolean(currentDelays?.tombola?.expired) },
+    tombola: { max: clean.thresholds.delayMaxTombola, expired: false },
   };
   return {
     enginePatch: {
@@ -341,8 +355,14 @@ export function createInitialRegiaState(): RegiaStateSnapshot {
     },
     cloudBank: {
       connected: false,
+      firebaseConnected: false,
+      serverConnected: false,
+      appwriteConnected: false,
+      appwriteConfigured: false,
+      dbMode: resolveDatabaseMode(),
       statusLabel: 'Inizializzazione...',
       balance: 0,
+      currentGameUnclaimed: 0,
       currency: '€',
       lastUpdated: '--',
       history: [],
@@ -657,7 +677,7 @@ export class RegiaStateManager {
   }
 
   // --------------------------------------------------------------------------
-  // FIRESTORE SYNCHRONIZATION LAYER (JACKPOT BANK + PROFILES + SETTINGS)
+  // DUAL-DATABASE SYNCHRONIZATION LAYER (FIREBASE + APPWRITE + PROFILES)
   // --------------------------------------------------------------------------
   public async initFirestoreSync(forceReinit = false): Promise<boolean> {
     if (this.firestoreInitPromise && !forceReinit) {
@@ -667,28 +687,21 @@ export class RegiaStateManager {
     this.firestoreInitPromise = (async () => {
       this.updateCloudBankState({ statusLabel: 'Connessione...', isSyncing: true });
       try {
-        const connected = await initFirebaseJackpot();
+        const dualStatus = await initDualDatabases();
 
-        // 1. Load Jackpot Bank + History
-        if (connected) {
-          try {
-            const [bankData, history] = await Promise.all([
-              getJackpotBank(),
-              getUnclaimedHistory(8),
-            ]);
-            this.applyJackpotBankData(bankData, true, history);
-          } catch (bankErr) {
-            console.warn('[RegiaState] Initial bank load error:', bankErr);
-            this.updateCloudBankState({
-              connected: false,
-              statusLabel: 'Offline',
-              isSyncing: false,
-            });
-          }
-        } else {
+        // 1. Load Jackpot Bank (both currentGameUnclaimed + accumulatedUnclaimed) & History
+        try {
+          const { bank, history, status } = await getDualJackpotBankAndHistory(8);
+          this.applyJackpotBankData(bank, status, history, true);
+        } catch (bankErr) {
+          console.warn('[RegiaState] Initial dual bank load error:', bankErr);
           this.updateCloudBankState({
-            connected: false,
-            statusLabel: 'Offline',
+            connected: dualStatus.anyCloudConnected,
+            firebaseConnected: dualStatus.firebaseConnected,
+            appwriteConnected: dualStatus.appwriteConnected,
+            appwriteConfigured: dualStatus.appwriteConfigured,
+            dbMode: dualStatus.mode,
+            statusLabel: dualStatus.anyCloudConnected ? dualStatus.statusLabel : 'Offline (Cache)',
             isSyncing: false,
           });
         }
@@ -698,10 +711,10 @@ export class RegiaStateManager {
 
         // 3. Load Unified Game Config Document (regia_config/main: difficoltà, soglie, premi)
         try {
-          const unifiedRes = await getRegiaGameConfig();
+          const unifiedRes = await getDualRegiaGameConfig();
           if (unifiedRes.config) {
             this.applyUnifiedGameConfig(unifiedRes.config, {
-              logSource: unifiedRes.fromCloud ? 'Firestore Cloud (regia_config/main)' : 'Cache Locale',
+              logSource: unifiedRes.fromCloud ? 'Cloud DB (regia_config/main)' : 'Cache Locale',
             });
           } else {
             await this.syncRegiaCardsWithFirestore({ immediate: true, source: 'init_seed' });
@@ -713,11 +726,13 @@ export class RegiaStateManager {
         // 4. Attach real-time Firestore listeners (idempotent)
         this.attachFirestoreSubscriptions();
 
-        return connected;
+        return dualStatus.anyCloudConnected;
       } catch (err) {
-        console.error('[RegiaState] Error initializing Firestore sync:', err);
+        console.error('[RegiaState] Error initializing Dual-DB sync:', err);
         this.updateCloudBankState({
           connected: false,
+          firebaseConnected: false,
+          appwriteConnected: false,
           statusLabel: 'Errore',
           isSyncing: false,
         });
@@ -786,11 +801,11 @@ export class RegiaStateManager {
     const performPersist = async (targetPayload: RegiaGameConfigDoc, targetSig: string): Promise<boolean> => {
       this.lastSavedConfigSig = targetSig;
       try {
-        const res = await saveRegiaGameConfig(targetPayload);
+        const res = await saveDualRegiaGameConfig(targetPayload);
         if (options.immediate && options.source !== 'init_seed') {
           this.addLog(
             res.savedToCloud
-              ? `Configurazione unificata salvata su Firestore (regia_config/main).`
+              ? `Configurazione unificata salvata nel Database Cloud (regia_config/main).`
               : `Configurazione unificata salvata in cache locale (Cloud offline).`,
             res.savedToCloud ? 'info' : 'warn'
           );
@@ -824,7 +839,7 @@ export class RegiaStateManager {
   private attachFirestoreSubscriptions() {
     if (!this.unsubBank) {
       this.unsubBank = subscribeToJackpotBank((bankData) => {
-        this.applyJackpotBankData(bankData, true);
+        this.applyJackpotBankData(bankData, buildDualDatabaseStatus(), undefined, false);
         void this.refreshCloudHistoryFromFirestore();
       });
     }
@@ -880,8 +895,9 @@ export class RegiaStateManager {
 
   private applyJackpotBankData(
     bankData: JackpotBankData,
-    connected: boolean,
-    history?: UnclaimedHistoryEntry[]
+    dualStatus: DualDatabaseStatus,
+    history?: UnclaimedHistoryEntry[],
+    syncCurrentGameToPrizes = false
   ) {
     let formattedTime = this.state.cloudBank.lastUpdated;
     if (bankData.lastUpdated) {
@@ -896,15 +912,34 @@ export class RegiaStateManager {
       }
     }
 
+    const currentUnclaimed = Number(bankData.currentGameUnclaimed) || 0;
+
     this.updateCloudBankState({
-      connected,
-      statusLabel: connected ? 'Connesso Cloud' : 'Offline',
+      connected: dualStatus.anyCloudConnected,
+      firebaseConnected: dualStatus.firebaseConnected,
+      serverConnected: dualStatus.serverConnected,
+      appwriteConnected: dualStatus.appwriteConnected,
+      appwriteConfigured: dualStatus.appwriteConfigured,
+      dbMode: dualStatus.mode,
+      statusLabel: dualStatus.statusLabel,
       balance: Number(bankData.accumulatedUnclaimed) || 0,
+      currentGameUnclaimed: currentUnclaimed,
       currency: bankData.currency || '€',
       lastUpdated: formattedTime,
       history: history ?? this.state.cloudBank.history,
       isSyncing: false,
     });
+
+    if (syncCurrentGameToPrizes) {
+      const prevUnclaimed = this.state.prizes.unclaimedCurrentGame;
+      if (Math.abs(prevUnclaimed - currentUnclaimed) > 0.001) {
+        this.syncPrizesState({
+          unclaimedCurrentGame: currentUnclaimed,
+          currency: bankData.currency || this.state.prizes.currency,
+        });
+        this.emitPrizesSync();
+      }
+    }
   }
 
   private updateCloudBankState(partial: Partial<RegiaStateSnapshot['cloudBank']>) {
@@ -920,19 +955,26 @@ export class RegiaStateManager {
   }
 
   public async refreshCloudHistoryFromFirestore(): Promise<UnclaimedHistoryEntry[]> {
-    const history = await getUnclaimedHistory(8);
+    const { history } = await getDualJackpotBankAndHistory(8);
     this.updateCloudBankState({ history });
     return history;
   }
 
   public async syncBankFromFirestore(): Promise<JackpotBankData> {
     this.updateCloudBankState({ isSyncing: true });
-    const [bankData, history] = await Promise.all([
-      getJackpotBank(),
-      getUnclaimedHistory(8),
-    ]);
-    this.applyJackpotBankData(bankData, true, history);
-    return bankData;
+    const { bank, history, status } = await getDualJackpotBankAndHistory(8);
+    this.applyJackpotBankData(bank, status, history, true);
+    return bank;
+  }
+
+  public async saveCurrentGameUnclaimedToCloud(amount: number, currency: string) {
+    const safeAmount = Math.max(0, Math.round((Number(amount) || 0) * 100) / 100);
+    const res = await saveDualCurrentGameUnclaimed(safeAmount, currency);
+    this.updateCloudBankState({
+      currentGameUnclaimed: safeAmount,
+      currency: currency || this.state.cloudBank.currency,
+    });
+    return res;
   }
 
   public async depositUnclaimedToFirestore(
@@ -942,8 +984,9 @@ export class RegiaStateManager {
     gameId: string,
     note: string
   ) {
-    const res = await saveUnclaimedToDatabase(amount, currency, prizeCategory, gameId, note);
+    const res = await depositDualUnclaimed(amount, currency, prizeCategory, gameId, note);
     if (res.success) {
+      this.syncPrizesState({ unclaimedCurrentGame: 0, currency });
       await this.syncBankFromFirestore();
     }
     return res;
@@ -954,7 +997,7 @@ export class RegiaStateManager {
     gameId: string,
     note: string
   ) {
-    const res = await recallUnclaimedIntoGame(amountToRecall, gameId, note);
+    const res = await recallDualUnclaimed(amountToRecall, gameId, note);
     if (res.success) {
       await this.syncBankFromFirestore();
     }
@@ -962,11 +1005,33 @@ export class RegiaStateManager {
   }
 
   public async resetBankInFirestore(gameId: string, note: string) {
-    const res = await resetJackpotBank(gameId, note);
+    const res = await resetDualJackpotBank(gameId, note);
     if (res.success) {
       await this.syncBankFromFirestore();
     }
     return res;
+  }
+
+  public async setDatabaseMode(mode: DatabaseMode): Promise<DualDatabaseStatus> {
+    saveDatabaseMode(mode);
+    const status = await initDualDatabases();
+    await this.syncBankFromFirestore();
+    this.addLog(
+      `Modalità Database impostata su ${mode.toUpperCase()} (${status.statusLabel}).`,
+      status.anyCloudConnected ? 'info' : 'warn'
+    );
+    return status;
+  }
+
+  public async configureAppwriteAndReconnect(cfg: Partial<AppwriteConfig>): Promise<DualDatabaseStatus> {
+    const status = await initDualDatabases(cfg);
+    await this.syncBankFromFirestore();
+    if (status.appwriteConnected) {
+      this.addLog('Appwrite Cloud connesso e sincronizzato con successo!', 'win');
+    } else if (status.appwriteError) {
+      this.addLog(`Errore connessione Appwrite: ${status.appwriteError}`, 'warn');
+    }
+    return status;
   }
 
   public async loadProfilesFromFirestore(): Promise<{
@@ -1293,9 +1358,23 @@ export class RegiaStateManager {
 
   private renderCloudBankCardToDOM() {
     if (typeof document === 'undefined') return;
-    const { connected, statusLabel, balance, currency, lastUpdated, history } = this.state.cloudBank;
+    const {
+      connected,
+      firebaseConnected,
+      serverConnected,
+      appwriteConnected,
+      appwriteConfigured,
+      statusLabel,
+      balance,
+      currency,
+      lastUpdated,
+      history,
+    } = this.state.cloudBank;
 
     const statusEl = document.getElementById('regiaCloudStatus');
+    const fbDotEl = document.getElementById('regiaFbStatusPill');
+    const srvDotEl = document.getElementById('regiaServerDbStatusPill');
+    const awDotEl = document.getElementById('regiaAwStatusPill');
     const balanceEl = document.getElementById('regiaCloudBalance');
     const updatedEl = document.getElementById('regiaCloudLastUpdated');
     const historyListEl = document.getElementById('regiaCloudHistoryList');
@@ -1303,6 +1382,28 @@ export class RegiaStateManager {
     if (statusEl) {
       const dotClass = connected || statusLabel === 'Connessione...' ? 'online' : 'offline';
       statusEl.innerHTML = `<span class="cloud-dot ${dotClass}"></span> ${escapeHtml(statusLabel)}`;
+    }
+    if (fbDotEl) {
+      fbDotEl.className = `dual-db-pill ${firebaseConnected ? 'online' : 'offline'}`;
+      fbDotEl.title = firebaseConnected ? 'Firebase Firestore connesso' : 'Firebase Firestore offline';
+      fbDotEl.innerHTML = `<span class="cloud-dot ${firebaseConnected ? 'online' : 'offline'}"></span> Firebase`;
+    }
+    if (srvDotEl) {
+      srvDotEl.className = `dual-db-pill ${serverConnected ? 'online' : 'offline'}`;
+      srvDotEl.title = serverConnected
+        ? 'Database Server integrato attivo su disco (/api/db/*)'
+        : 'Server DB non disponibile su hosting statico';
+      srvDotEl.innerHTML = `<span class="cloud-dot ${serverConnected ? 'online' : 'offline'}"></span> Server DB`;
+    }
+    if (awDotEl) {
+      const awState = appwriteConnected ? 'online' : appwriteConfigured ? 'offline' : 'unconfigured';
+      awDotEl.className = `dual-db-pill ${awState}`;
+      awDotEl.title = appwriteConnected
+        ? 'Appwrite Cloud connesso'
+        : appwriteConfigured
+          ? 'Appwrite configurato ma offline (clicca per verificare)'
+          : 'Opzionale: clicca per collegare anche Appwrite Cloud';
+      awDotEl.innerHTML = `<span class="cloud-dot ${awState}"></span> Appwrite`;
     }
     if (balanceEl) {
       balanceEl.textContent = `${currency} ${balance.toFixed(2)}`;
@@ -1469,9 +1570,12 @@ export class RegiaStateManager {
         if (wonTypes.has(k)) {
           stat.className = 'delay-status-badge won';
           stat.textContent = 'VINTO';
-        } else if (conf.expired) {
+        } else if (k !== 'tombola' && conf.expired) {
           stat.className = 'delay-status-badge expired';
           stat.textContent = 'SCADUTO ➜ Cassa';
+        } else if (k === 'tombola') {
+          stat.className = 'delay-status-badge';
+          stat.textContent = 'Sempre attiva (15/15)';
         } else {
           stat.className = 'delay-status-badge';
           stat.textContent = `Entro ${conf.max}`;

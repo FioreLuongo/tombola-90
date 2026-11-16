@@ -67,7 +67,8 @@ export interface WinCheckResult {
 export function getCurrentActivePrize(progress: GamePrizesProgress): PrizeType | null {
     for (const prize of PRIZE_SEQUENCE) {
         const status = progress[prize];
-        const isClosed = status && (status.won || status.expired);
+        // La Tombola (15 numeri) non scade mai prima che una cartella completi tutti i 15 numeri
+        const isClosed = status && (status.won || (prize !== 'tombola' && status.expired));
         if (!isClosed) {
             return prize;
         }
@@ -85,22 +86,22 @@ export function evaluateCartellaForPrize(
     justDrawnNumber?: number
 ): { qualified: boolean; row: number | null; numbers: number[] } {
     const extractedSet = new Set(drawnNumbers);
-    
+
+    if (targetPrize === 'tombola') {
+        const allCartellaNumbers = cartella.numbers.map(n => n.number);
+        const covered = allCartellaNumbers.filter(num => extractedSet.has(num));
+        if (allCartellaNumbers.length > 0 && covered.length === allCartellaNumbers.length) {
+            return { qualified: true, row: -1, numbers: covered };
+        }
+        return { qualified: false, row: null, numbers: [] };
+    }
+
     // If justDrawnNumber is provided, ensure this cartella actually contains the new number
     if (justDrawnNumber !== undefined) {
         const containsNew = cartella.numbers.some(n => n.number === justDrawnNumber);
         if (!containsNew) {
             return { qualified: false, row: null, numbers: [] };
         }
-    }
-
-    if (targetPrize === 'tombola') {
-        const allCartellaNumbers = cartella.numbers.map(n => n.number);
-        const covered = allCartellaNumbers.filter(num => extractedSet.has(num));
-        if (covered.length === 15) {
-            return { qualified: true, row: -1, numbers: covered };
-        }
-        return { qualified: false, row: null, numbers: [] };
     }
 
     const requiredInRow = PRIZE_ROW_REQUIREMENTS[targetPrize];
@@ -149,27 +150,47 @@ export function checkSequentialWins(
         };
     }
 
-    // Evaluate cartelle in order
-    for (const cartella of cartelle) {
-        if (cartella.isActive === false) continue;
+    const activeCartelle = cartelle.filter(c => c.isActive !== false);
 
-        const evalResult = evaluateCartellaForPrize(cartella, activeStage, drawnNumbers, newNumber);
-        if (evalResult.qualified) {
-            // Check optional delay / anti-win condition
-            if (canAwardPrizeFilter && !canAwardPrizeFilter(activeStage, cartella.id)) {
-                continue;
+    if (activeStage === 'tombola') {
+        // Prefer cards containing newNumber first, then any active card that already covered all 15 numbers
+        const orderedCandidates = [
+            ...activeCartelle.filter(c => c.numbers.some(n => n.number === newNumber)),
+            ...activeCartelle.filter(c => !c.numbers.some(n => n.number === newNumber))
+        ];
+
+        for (const cartella of orderedCandidates) {
+            const evalResult = evaluateCartellaForPrize(cartella, 'tombola', drawnNumbers, newNumber);
+            if (evalResult.qualified) {
+                return {
+                    won: true,
+                    prizeType: 'tombola',
+                    cartellaId: cartella.id,
+                    winningRow: -1,
+                    winningNumbers: evalResult.numbers,
+                    nextStageAfterWin: null
+                };
             }
+        }
+    } else {
+        // Evaluate cartelle in order for row prizes (ambo -> terno -> quaterna -> cinquina)
+        for (const cartella of activeCartelle) {
+            const evalResult = evaluateCartellaForPrize(cartella, activeStage, drawnNumbers, newNumber);
+            if (evalResult.qualified) {
+                if (canAwardPrizeFilter && !canAwardPrizeFilter(activeStage, cartella.id)) {
+                    continue;
+                }
 
-            // We have a winner for the active prize stage!
-            const nextStage = getNextPrizeStage(activeStage);
-            return {
-                won: true,
-                prizeType: activeStage,
-                cartellaId: cartella.id,
-                winningRow: evalResult.row,
-                winningNumbers: evalResult.numbers,
-                nextStageAfterWin: nextStage
-            };
+                const nextStage = getNextPrizeStage(activeStage);
+                return {
+                    won: true,
+                    prizeType: activeStage,
+                    cartellaId: cartella.id,
+                    winningRow: evalResult.row,
+                    winningNumbers: evalResult.numbers,
+                    nextStageAfterWin: nextStage
+                };
+            }
         }
     }
 

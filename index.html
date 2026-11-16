@@ -55,7 +55,7 @@
     <div class="win-banner-badge"><i class="fas fa-trophy"></i></div>
     <div class="win-banner-body">
         <div class="win-banner-title" id="winBannerTitle">AMBO REALIZZATO!</div>
-        <div class="win-banner-sub" id="winBannerSub">Cartella TOM001.G1.F001.C15 • € 150.00</div>
+        <div class="win-banner-sub" id="winBannerSub">Cartella TOMB-001.G1.F001.C15 • € 150.00</div>
     </div>
     <button class="win-banner-close-btn" id="winBannerCloseBtn"><i class="fas fa-times"></i></button>
 </div>
@@ -102,9 +102,16 @@
 <div class="cartelle-section" id="cartelleSection">
     <div class="cartelle-fixed-header">
         <div class="cartelle-header">
-            <div class="cartelle-title" id="cartelleTitle">Generatore Cartelle Tombola 90</div>
+            <div class="cartelle-title-wrap">
+                <div class="cartelle-title" id="cartelleTitle">Generatore Cartelle Tombola 90</div>
+                <div class="cartelle-mode-tabs" id="cartelleModeTabs" role="tablist" aria-label="Modalità Generazione Cartelle">
+                    <button type="button" class="mode-tab-btn active" id="modeMenuTabBtn" data-mode="menu"><i class="fas fa-th-large"></i> Menù Iniziale</button>
+                    <button type="button" class="mode-tab-btn" id="modeTavoloTabBtn" data-mode="tavolo"><i class="fas fa-chess-board"></i> Gioco a Tavolo (TAV-G001)</button>
+                    <button type="button" class="mode-tab-btn" id="modeOnlineTabBtn" data-mode="online"><i class="fas fa-globe"></i> Gioco Online</button>
+                </div>
+            </div>
             <div class="cartelle-controls">
-                <button class="cartelle-btn cartelle-generate" id="generateCartelle"><i class="fas fa-plus-circle"></i> <span id="generate-text">Genera Cartelle</span></button>
+                <button class="cartelle-btn cartelle-generate" id="generateCartelle" style="display: none;"><i class="fas fa-plus-circle"></i> <span id="generate-text">Genera Cartelle</span></button>
                 <button class="cartelle-btn cartelle-print" id="printCartelleBtn"><i class="fas fa-print"></i> <span>Stampa A4</span></button>
                 <button class="cartelle-btn cartelle-pdf" id="exportPDF"><i class="fas fa-file-pdf"></i> <span id="export-text">Esporta PDF</span></button>
                 <button class="cartelle-btn cartelle-json-export" id="exportJSON"><i class="fas fa-file-export"></i> <span id="export-json-text">Esporta JSON</span></button>
@@ -113,17 +120,105 @@
                 <button class="cartelle-btn cartelle-close" id="closeCartelle"><i class="fas fa-times"></i> <span id="close-text">Chiudi</span></button>
             </div>
         </div>
-        <div class="cartelle-input-group">
-            <div><div class="cartelle-label" id="gameIdLabel">ID Gioco:</div><input type="text" class="cartelle-input" id="gameId" value="TOM001" placeholder="ID Gioco"></div>
+
+        <!-- MENÙ INIZIALE GENERAZIONE CARTELLE -->
+        <div class="cartelle-mode-menu" id="cartelleModeMenu">
+            <div class="mode-menu-intro">
+                <h3><i class="fas fa-ticket-alt gold-text"></i> Seleziona la Modalità di Generazione Cartelle</h3>
+                <p>Scegli se gestire la sezione permanente per il gioco da tavolo (30 fogli salvati nel database) oppure generare cartelle dinamiche per il gioco online.</p>
+            </div>
+            <div class="mode-menu-cards">
+                <button type="button" class="mode-menu-card tavolo-card" id="chooseModeTavoloBtn">
+                    <div class="mode-card-icon"><i class="fas fa-chess-board"></i></div>
+                    <div class="mode-card-body">
+                        <div class="mode-card-title">Gioco a Tavolo <span class="mode-card-tag">TAV-G001</span></div>
+                        <div class="mode-card-desc">Genera e salva permanentemente <b>30 Fogli A4</b> (Foglio 01 – 30) nel database per stamparli quando vuoi e selezionare quali fogli sono in gioco.</div>
+                        <div class="mode-card-status" id="menuTavoloSavedStatus">Controllo database...</div>
+                    </div>
+                    <div class="mode-card-arrow"><i class="fas fa-arrow-right"></i></div>
+                </button>
+                <button type="button" class="mode-menu-card online-card" id="chooseModeOnlineBtn">
+                    <div class="mode-card-icon"><i class="fas fa-globe"></i></div>
+                    <div class="mode-card-body">
+                        <div class="mode-card-title">Gioco Online <span class="mode-card-tag online">TOMB-001</span></div>
+                        <div class="mode-card-desc">Generazione dinamica per giocatori online (ID predefinito <b>TOMB-001</b>) in base al numero di partecipanti reali, foglio iniziale, export e import JSON.</div>
+                        <div class="mode-card-status">Modalità classica dinamica (indipendente dal Tavolo)</div>
+                    </div>
+                    <div class="mode-card-arrow"><i class="fas fa-arrow-right"></i></div>
+                </button>
+            </div>
+        </div>
+
+        <!-- SEZIONE TAVOLO GIOCO (30 FOGLI PERMANENTI + BOX SELEZIONE FOGLI IN GIOCO) -->
+        <div class="tavolo-mode-controls" id="tavoloModeControls" style="display: none;">
+            <div class="tavolo-toolbar">
+                <div class="tavolo-field">
+                    <label for="tavoloSetSelect" class="cartelle-label">Sezione Tavolo Salvata:</label>
+                    <select class="cartelle-input tavolo-select" id="tavoloSetSelect">
+                        <option value="TAV-G001">TAV-G001 (30 Fogli Permanenti)</option>
+                    </select>
+                </div>
+                <div class="tavolo-field">
+                    <label for="tavoloGameIdInput" class="cartelle-label">ID Gioco Tavolo:</label>
+                    <input type="text" class="cartelle-input" id="tavoloGameIdInput" value="TAV-G001" placeholder="TAV-G001">
+                </div>
+                <div class="tavolo-field small">
+                    <label for="tavoloNumSheetsInput" class="cartelle-label">N° Fogli:</label>
+                    <input type="number" class="cartelle-input" id="tavoloNumSheetsInput" min="1" max="100" value="30">
+                </div>
+                <div class="tavolo-toolbar-actions">
+                    <button type="button" class="cartelle-btn tavolo-save-btn" id="generateTavoloSetBtn">
+                        <i class="fas fa-save"></i> <span>Genera &amp; Salva 30 Fogli Permanenti</span>
+                    </button>
+                    <button type="button" class="cartelle-btn tavolo-load-btn" id="loadTavoloSetBtn">
+                        <i class="fas fa-cloud-download-alt"></i> <span>Richiama da Database</span>
+                    </button>
+                    <span class="tavolo-db-badge" id="tavoloDbStatusBadge">
+                        <i class="fas fa-database"></i> Pronto
+                    </span>
+                </div>
+            </div>
+
+            <div class="tavolo-sheets-selector-box" id="tavoloSheetsSelectorBox">
+                <div class="selector-box-header">
+                    <div class="selector-box-title">
+                        <i class="fas fa-check-square gold-text"></i>
+                        <span>Istruzioni Estrazione — Clicca i Fogli in Gioco (<b id="tavoloActiveGameLabel">TAV-G001</b>):</span>
+                    </div>
+                    <div class="tavolo-last-saved-note" id="tavoloLastSavedNote" title="Verifica data e ora dell'ultimo salvataggio nel database">
+                        <i class="fas fa-database"></i>
+                        <span id="tavoloLastSavedText">In attesa di generazione/salvataggio nel database</span>
+                    </div>
+                    <div class="selector-box-summary" id="tavoloActiveSummary">In gioco: 0 / 30 fogli • 0 cartelle controllate</div>
+                </div>
+                <div class="selector-quick-bar">
+                    <button type="button" class="tavolo-quick-btn" id="tavoloSelectAllBtn">Tutti (30)</button>
+                    <button type="button" class="tavolo-quick-btn" id="tavoloSelectNoneBtn">Nessuno</button>
+                    <button type="button" class="tavolo-quick-btn" id="tavoloSelectFirst5Btn">Primi 5</button>
+                    <button type="button" class="tavolo-quick-btn" id="tavoloSelectFirst10Btn">Primi 10</button>
+                    <button type="button" class="tavolo-quick-btn" id="tavoloSelectFirst15Btn">Primi 15</button>
+                    <label class="tavolo-filter-toggle">
+                        <input type="checkbox" id="tavoloOnlySelectedToggle">
+                        <span>Visualizza / Stampa solo fogli in gioco</span>
+                    </label>
+                </div>
+                <div class="tavolo-sheets-grid" id="tavoloSheetsGrid" role="group" aria-label="Selezione Fogli in Gioco"></div>
+            </div>
+        </div>
+
+        <!-- CONTROLLI MODALITÀ ONLINE (CLASSICA) -->
+        <div class="cartelle-input-group" id="onlineModeControls" style="display: none;">
+            <div><div class="cartelle-label" id="gameIdLabel">ID Gioco:</div><input type="text" class="cartelle-input" id="gameId" value="TOMB-001" placeholder="TOMB-001"></div>
             <div><div class="cartelle-label" id="numGiocatoriLabel">Numero Giocatori:</div><input type="number" class="cartelle-input" id="numGiocatori" min="1" max="20" value="1" placeholder="Giocatori"></div>
             <div><div class="cartelle-label" id="startSheetLabel">Foglio Iniziale:</div><input type="number" class="cartelle-input" id="startSheet" min="1" max="1000" value="1" placeholder="Foglio Iniziale"></div>
             <div><div class="cartelle-label" id="participatingGiocatoriLabel">Giocatori Partecipanti:</div><input type="number" class="cartelle-input" id="participatingGiocatori" min="0" max="20" value="0" placeholder="0"></div>
         </div>
+
         <div class="cartelle-stats" id="cartelleStats">
             <div class="stat-item"><div class="stat-value" id="totalCartelle">0</div><div class="stat-label" id="total-cartelle-label">Cartelle Totali</div></div>
             <div class="stat-item"><div class="stat-value" id="totalFogli">0</div><div class="stat-label" id="total-fogli-label">Fogli Totali</div></div>
-            <div class="stat-item"><div class="stat-value" id="totalGiocatori">0</div><div class="stat-label" id="total-giocatori-label">Giocatori</div></div>
-            <div class="stat-item"><div class="stat-value" id="totalParticipatingGiocatori">0</div><div class="stat-label" id="total-participating-label">Partecipanti</div></div>
+            <div class="stat-item"><div class="stat-value" id="totalGiocatori">0</div><div class="stat-label" id="total-giocatori-label">Fogli / Giocatori</div></div>
+            <div class="stat-item"><div class="stat-value" id="totalParticipatingGiocatori">0</div><div class="stat-label" id="total-participating-label">In Gioco</div></div>
         </div>
     </div>
     <div class="cartelle-scrollable-container" id="cartelleContainer"></div>
@@ -140,7 +235,7 @@
         <h3><i class="fas fa-file-import"></i> <span id="import-json-title">Importa Cartelle da JSON</span></h3>
         <div class="json-info">
             <p><strong>Formato JSON atteso:</strong></p>
-            <pre>{"gameId": "TOM001","cartelle":[]}</pre>
+            <pre>{"gameId": "TOMB-001","cartelle":[]}</pre>
             <p><strong>Opzione alternativa:</strong> Carica un file JSON</p>
             <input type="file" id="jsonFileUpload" accept=".json" style="margin: 10px 0;">
         </div>
@@ -338,6 +433,23 @@
                             </span>
                         </div>
 
+                        <div class="dual-db-bar" id="regiaDualDbBar">
+                            <div class="dual-db-pills-group">
+                                <button type="button" class="dual-db-pill offline" id="regiaFbStatusPill" title="Stato Database Firebase Firestore">
+                                    <span class="cloud-dot offline"></span> Firebase
+                                </button>
+                                <button type="button" class="dual-db-pill offline" id="regiaServerDbStatusPill" title="Stato Database Server Integrato (Automatico)">
+                                    <span class="cloud-dot offline"></span> Server DB
+                                </button>
+                                <button type="button" class="dual-db-pill unconfigured" id="regiaAwStatusPill" title="Opzionale: Appwrite Cloud">
+                                    <span class="cloud-dot unconfigured"></span> Appwrite
+                                </button>
+                            </div>
+                            <button type="button" class="dual-db-config-btn" id="regiaDbConfigBtn" title="Configura modalità Dual-Database (Firebase + Server DB + Appwrite opzionale)">
+                                <i class="fas fa-sliders-h"></i> Dual-DB
+                            </button>
+                        </div>
+
                         <!-- Non Vinti della Partita Attuale -->
                         <div class="regia-current-unclaimed-row">
                             <div class="unclaimed-meta">
@@ -366,14 +478,20 @@
                             </button>
                         </div>
 
-                        <!-- Strumenti secondari & Auto-salva -->
+                        <!-- Strumenti secondari, Auto-accumulo & Auto-richiamo -->
                         <div class="regia-cloud-tools-row">
-                            <label class="regia-checkbox-label" title="Salva automaticamente il montepremi residuo quando la partita termina o viene resettata">
-                                <input type="checkbox" id="regiaAutoSaveCloudToggle" checked />
-                                <span>Auto-salva a fine partita / reset</span>
-                            </label>
+                            <div class="regia-cloud-checkboxes">
+                                <label class="regia-checkbox-label" title="Accumula automaticamente i non vinti nel Totale Database a fine partita o reset">
+                                    <input type="checkbox" id="regiaAutoSaveCloudToggle" checked />
+                                    <span>Auto-accumula a fine partita / reset</span>
+                                </label>
+                                <label class="regia-checkbox-label" title="Richiama automaticamente il Totale Database nel Montepremi della partita successiva">
+                                    <input type="checkbox" id="regiaAutoRecallCloudToggle" checked />
+                                    <span>Auto-richiama Totale in partita successiva</span>
+                                </label>
+                            </div>
                             <div class="regia-mini-btn-group">
-                                <button type="button" class="regia-btn-xs" id="regiaSyncCloudBtn" title="Sincronizza con Firebase Firestore"><i class="fas fa-sync-alt"></i> Sincronizza</button>
+                                <button type="button" class="regia-btn-xs" id="regiaSyncCloudBtn" title="Sincronizza con i Database Cloud (Firebase + Appwrite)"><i class="fas fa-sync-alt"></i> Sincronizza</button>
                                 <button type="button" class="regia-btn-xs danger" id="regiaResetCloudBtn" title="Azzera Cassa Cloud nel Database"><i class="fas fa-trash-alt"></i> Azzera Database</button>
                             </div>
                         </div>
@@ -394,8 +512,12 @@
                     <span class="regia-card-badge" id="regiaActiveColorsBadge">0 Colori Attivi</span>
                 </div>
                 <div class="regia-colors-content">
+                    <div class="regia-tavolo-banner" id="regiaTavoloInfoBanner" style="display: none;">
+                        <i class="fas fa-chess-board gold-text"></i>
+                        <span id="regiaTavoloInfoText">Sezione Tavolo: TAV-G001 • 0 fogli attivi</span>
+                    </div>
                     <div class="regia-help-text" style="margin-bottom: 8px;">
-                        Tutti i colori sono <b>disattivati</b>. L'amministratore attiva manualmente quale colore è in gioco.
+                        Tutti i colori sono <b>disattivati</b> (in Tavolo Gioco si attivano automaticamente sui fogli selezionati).
                     </div>
                     <div class="regia-color-item blue-item">
                         <div class="color-head"><span class="color-indicator blue"></span><b>Cartelle BLU</b></div>
@@ -526,10 +648,10 @@
                         <div class="regia-delay-row unified-row unified-row-tombola" data-prize="tombola">
                             <span class="delay-prize-name"><i class="fas fa-crown" style="color: #f59e0b;"></i> Tombola (45%)</span>
                             <div class="unified-input-cell"><input type="number" id="forcedMinTombola" min="1" max="90" value="75" class="regia-micro-input" /></div>
-                            <div class="unified-input-cell"><input type="number" id="delayInputTombola" min="5" max="90" value="85" class="regia-num-input" /></div>
+                            <div class="unified-input-cell"><input type="number" id="delayInputTombola" min="5" max="90" value="90" class="regia-num-input" /></div>
                             <div class="unified-status-cell">
-                                <span class="delay-progress" id="delayProgressTombola">0 / 85</span>
-                                <span class="delay-status-badge" id="delayStatusTombola">Entro 85</span>
+                                <span class="delay-progress" id="delayProgressTombola">0 / 90</span>
+                                <span class="delay-status-badge" id="delayStatusTombola">Sempre attiva (15/15)</span>
                             </div>
                         </div>
                     </div>
@@ -1075,6 +1197,236 @@ firebase deploy --only hosting</code></pre>
       <button type="button" class="guide-footer-btn print" id="modalPrintFooterBtn"><i class="fas fa-print"></i> Stampa Guida (A4 / PDF)</button>
       <button type="button" class="guide-footer-btn download" id="modalDownloadFooterBtn"><i class="fas fa-file-pdf"></i> Scarica File PDF Diretto</button>
       <button type="button" class="guide-footer-btn close" id="closeOnlineGuideModalBtn">Chiudi</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODALE CONFIGURAZIONE DUAL-DATABASE (FIREBASE + APPWRITE CLOUD) -->
+<div class="online-guide-modal-overlay dual-db-modal-overlay" id="dualDbModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="dualDbModalTitle">
+  <div class="online-guide-modal-dialog dual-db-modal-dialog">
+    <div class="online-guide-modal-header">
+      <div class="guide-modal-title-box">
+        <div class="guide-modal-badge"><i class="fas fa-database gold-text"></i> ARCHITETTURA MULTI-DATABASE RIDONDATA</div>
+        <h2 id="dualDbModalTitle">Database Attivi: Firebase + Server DB (+ Appwrite Opzionale)</h2>
+        <p>Firebase Firestore e il Server DB Integrato funzionano subito in automatico senza account aggiuntivi. Appwrite è solo un backup opzionale.</p>
+      </div>
+      <div class="guide-modal-header-actions">
+        <button type="button" class="guide-modal-close" id="closeDualDbHeaderBtn" aria-label="Chiudi configurazione Dual-DB" title="Chiudi">&times;</button>
+      </div>
+    </div>
+
+    <div class="online-guide-modal-body dual-db-modal-body">
+      <div class="dual-db-status-cards">
+        <div class="dual-db-provider-card" id="dualDbFbCard">
+          <div class="provider-head">
+            <span><i class="fas fa-fire" style="color:#f59e0b;"></i> Firebase Firestore</span>
+            <span class="provider-state-badge" id="dualDbFbState">Verifica...</span>
+          </div>
+          <div class="provider-sub">Progetto: <code>agile-lamp-6xq1s</code> (Automatico)</div>
+        </div>
+        <div class="dual-db-provider-card" id="dualDbSrvCard">
+          <div class="provider-head">
+            <span><i class="fas fa-server" style="color:#38bdf8;"></i> Server DB Integrato</span>
+            <span class="provider-state-badge" id="dualDbSrvState">Verifica...</span>
+          </div>
+          <div class="provider-sub" id="dualDbSrvSub">Persistenza automatica su disco (0 Config)</div>
+        </div>
+        <div class="dual-db-provider-card" id="dualDbAwCard">
+          <div class="provider-head">
+            <span><i class="fas fa-cloud" style="color:#f43f5e;"></i> Appwrite (Opzionale)</span>
+            <span class="provider-state-badge" id="dualDbAwState">Non configurato</span>
+          </div>
+          <div class="provider-sub" id="dualDbAwSub">Non obbligatorio (l'app funziona già al 100%)</div>
+        </div>
+      </div>
+
+      <div class="guide-section-block dual-db-mode-block">
+        <label for="dualDbModeSelect" class="dual-db-field-label"><i class="fas fa-random gold-text"></i> Modalità di Sincronizzazione Database:</label>
+        <select id="dualDbModeSelect" class="dual-db-select">
+          <option value="dual">Dual-Sync Automatico (Firebase + Server DB + Appwrite se configurato)</option>
+          <option value="server">Solo Server DB Integrato (Zero Account Esterni)</option>
+          <option value="firebase">Solo Firebase Firestore</option>
+          <option value="appwrite">Solo Appwrite Cloud (Esterno)</option>
+        </select>
+      </div>
+
+      <div class="guide-section-block">
+        <h3 class="guide-step-title highlight-gold"><i class="fas fa-plug"></i> Parametri Pubblici Appwrite Web SDK (Facoltativo)</h3>
+        <p class="guide-text">
+          Non serve compilare questa sezione: <b>Firebase + Server DB Integrato sono già attivi</b>. Compila qui sotto solo se desideri collegare anche un progetto Appwrite Cloud esterno.
+        </p>
+        <div class="dual-db-form-grid">
+          <div class="dual-db-field">
+            <label for="awEndpointInput">API Endpoint Appwrite</label>
+            <input type="url" id="awEndpointInput" class="dual-db-input" placeholder="https://cloud.appwrite.io/v1" />
+          </div>
+          <div class="dual-db-field">
+            <label for="awProjectIdInput">Project ID Appwrite</label>
+            <input type="text" id="awProjectIdInput" class="dual-db-input" placeholder="es. 67a1b2c3d4e5f6" />
+          </div>
+          <div class="dual-db-field">
+            <label for="awDatabaseIdInput">Database ID Appwrite</label>
+            <input type="text" id="awDatabaseIdInput" class="dual-db-input" placeholder="es. tombola_db" />
+          </div>
+          <div class="dual-db-field">
+            <label for="awBankCollInput">Collection ID Cassa Montepremi</label>
+            <input type="text" id="awBankCollInput" class="dual-db-input" placeholder="jackpot_bank" />
+          </div>
+          <div class="dual-db-field">
+            <label for="awHistoryCollInput">Collection ID Storico Movimenti</label>
+            <input type="text" id="awHistoryCollInput" class="dual-db-input" placeholder="unclaimed_history" />
+          </div>
+          <div class="dual-db-field">
+            <label for="awConfigCollInput">Collection ID Configurazione Regia</label>
+            <input type="text" id="awConfigCollInput" class="dual-db-input" placeholder="regia_config" />
+          </div>
+        </div>
+        <label class="regia-checkbox-label" style="margin-top:10px;">
+          <input type="checkbox" id="awAnonSessionCheck" />
+          <span>Attiva Sessione Anonima Appwrite (usa solo se i permessi Collection sono su "Users" invece che "Any")</span>
+        </label>
+
+        <div class="dual-db-feedback" id="dualDbTestFeedback" style="display: none;"></div>
+
+        <div class="dual-db-form-actions">
+          <button type="button" class="guide-action-btn btn-print" id="saveAppwriteConfigBtn">
+            <i class="fas fa-check-circle"></i> Salva &amp; Connetti Appwrite
+          </button>
+          <button type="button" class="regia-btn-xs" id="prefillAppwritePresetBtn" title="Precompila i dati del tuo progetto Appwrite (fra.cloud.appwrite.io)">
+            <i class="fas fa-magic"></i> Precompila (6af8bbbf...)
+          </button>
+          <button type="button" class="guide-action-btn btn-pdf" id="downloadAppwritePdfBtn" title="Scarica il PDF stampabile A4 passo-passo per Appwrite Console">
+            <i class="fas fa-file-pdf"></i> Scarica Guida Appwrite (PDF Stampabile)
+          </button>
+          <button type="button" class="guide-action-btn btn-zip" id="openAppwriteGuideModalBtn" title="Leggi subito su schermo e stampa su foglio A4 la configurazione Appwrite">
+            <i class="fas fa-book-open"></i> Leggi a Video &amp; Stampa A4
+          </button>
+          <button type="button" class="regia-btn-xs danger" id="clearAppwriteConfigBtn">
+            <i class="fas fa-unlink"></i> Reset Config Appwrite
+          </button>
+        </div>
+      </div>
+
+      <details class="guide-section-block dual-db-schema-details">
+        <summary><i class="fas fa-table gold-text"></i> Struttura Database &amp; Tabelle/Collezioni Appwrite (Setup rapido in 2 minuti)</summary>
+        <div class="dual-db-schema-body">
+          <p class="guide-text" style="margin-top:8px;">
+            Nella Console Appwrite (<b>Overview &rarr; Platforms &rarr; Add Web &rarr; Hostname <code>*</code></b>, poi <b>Databases &rarr; Create database</b> con ID manuale <code>tombola_db</code>), crea queste <b>3 Tables / Collections</b> impostando manualmente i loro ID e attivando in <b>Settings &rarr; Permissions</b> il ruolo <b>Any</b> (<code>Create</code>, <code>Read</code>, <code>Update</code>):
+          </p>
+          <ul class="guide-ordered-list">
+            <li><b>1) Table / Collection <code>jackpot_bank</code></b>:
+              <code>accumulatedUnclaimed</code> (Float), <code>currentGameUnclaimed</code> (Float), <code>currency</code> (String, size 8), <code>lastUpdated</code> (String, size 40), <code>totalGamesRecorded</code> (Integer).
+            </li>
+            <li><b>2) Table / Collection <code>unclaimed_history</code></b>:
+              <code>timestamp</code> (String, size 40), <code>gameId</code> (String, size 64), <code>type</code> (String, size 32), <code>amount</code> (Float), <code>balanceAfter</code> (Float), <code>prizeCategory</code> (String, size 64), <code>note</code> (String, size 250).
+            </li>
+            <li><b>3) Table / Collection <code>regia_config</code></b>:
+              <code>activeProfileId</code> (String, size 64), <code>payloadJson</code> (String, size 4000), <code>updatedAt</code> (String, size 40).
+            </li>
+          </ul>
+        </div>
+      </details>
+    </div>
+
+    <div class="online-guide-modal-footer">
+      <button type="button" class="guide-footer-btn close" id="closeDualDbFooterBtn">Chiudi</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODALE GUIDA STAMPABILE A4 APPWRITE CLOUD -->
+<div id="appwriteGuideModal" class="online-guide-modal-overlay" role="dialog" aria-modal="true" style="display: none; z-index: 100050;">
+  <div class="online-guide-modal-dialog">
+    <div class="online-guide-modal-header">
+      <div class="guide-modal-title-box">
+        <span class="guide-modal-badge"><i class="fas fa-database"></i> GUIDA STAMPABILE A4 • PROGETTO 6af8bbbf003dea6b4e91</span>
+        <h2>Configurazione Passo-Passo Appwrite Cloud</h2>
+      </div>
+      <div class="guide-modal-header-actions">
+        <button type="button" class="guide-action-btn btn-print" id="appwriteModalPrintGuideBtn">
+          <i class="fas fa-print"></i> <span>Stampa / PDF A4</span>
+        </button>
+        <button type="button" class="guide-action-btn btn-pdf" id="appwriteModalDownloadPdfBtn">
+          <i class="fas fa-file-pdf"></i> <span>Scarica .PDF</span>
+        </button>
+        <button type="button" class="guide-modal-close" id="closeAppwriteGuideModalBtn" title="Chiudi Guida">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+    </div>
+
+    <div class="online-guide-modal-body">
+      <div class="guide-section-block">
+        <h3><i class="fas fa-key gold-text"></i> Parametri Esatti del Tuo Progetto Appwrite</h3>
+        <div class="guide-code-box">
+          <pre>Console:     https://appwrite.io/projects/6af8bbbf003dea6b4e91/overview
+Endpoint:    https://fra.cloud.appwrite.io/v1
+Project ID:  6af8bbbf003dea6b4e91
+Database ID: tombola_db   (ATTENZIONE: imposta questo ID manuale, NON casuale!)
+Tabelle:     1) jackpot_bank   2) unclaimed_history   3) regia_config</pre>
+        </div>
+      </div>
+
+      <div class="guide-section-block">
+        <h3><span class="step-badge">1</span> Autorizza i Domini Web (Platforms &rarr; Web)</h3>
+        <ol class="guide-ordered-list">
+          <li>Apri Appwrite Console &rarr; <b>Overview</b> &rarr; sezione <b>Platforms</b> &rarr; <b>+ Add platform</b> &rarr; <b>Web</b>.</li>
+          <li><b>Name:</b> <code>Tombola 90</code> &bull; <b>Hostname:</b> <code>*</code> (autorizza localhost, AI Studio, Render, Vercel, Cloudflare).</li>
+          <li>Clicca <b>Next</b> / <b>Create</b> fino al completamento.</li>
+        </ol>
+      </div>
+
+      <div class="guide-section-block">
+        <h3><span class="step-badge">2</span> Crea il Database &ldquo;tombola_db&rdquo; (ID Manuale)</h3>
+        <ol class="guide-ordered-list">
+          <li>Menu sinistro &rarr; <b>Databases</b> &rarr; <b>Create database</b>.</li>
+          <li><b>Name:</b> <code>Tombola DB</code>. Clicca sulla matita / Edit accanto a <b>Database ID</b> e scrivi esattamente <code>tombola_db</code>.</li>
+          <li>Nota interfaccia Appwrite: le nuove versioni usano <b>Tables / Columns / Rows</b> invece di <b>Collections / Attributes / Documents</b> (i nomi dei campi sotto sono identici).</li>
+        </ol>
+      </div>
+
+      <div class="guide-section-block">
+        <h3><span class="step-badge">3</span> Crea le 3 Tabelle / Collezioni e le Colonne (Attributes)</h3>
+        <p class="guide-text">Per ciascuna tabella, imposta sempre l'<b>ID manuale</b> con l'icona della matita e attendi lo stato verde <b>Available</b> su ogni colonna:</p>
+        <div class="guide-code-box">
+          <pre>1) ID: jackpot_bank
+   - accumulatedUnclaimed : Float   (Required: No/Yes, Default: 0)
+   - currentGameUnclaimed : Float   (Required: No,     Default: 0)
+   - currency             : String  (Size: 8,  Required: No, Default vuoto o EUR)
+   - lastUpdated          : String  (Size: 40, Required: No, Default vuoto)
+   - totalGamesRecorded   : Integer (Required: No,     Default: 0)
+
+2) ID: unclaimed_history
+   - timestamp     : String (Size: 40,  Required: Yes)
+   - gameId        : String (Size: 64,  Required: Yes)
+   - type          : String (Size: 32,  Required: Yes)
+   - amount        : Float  (Required: Yes)
+   - balanceAfter  : Float  (Required: Yes)
+   - prizeCategory : String (Size: 64,  Required: No, Default: all)
+   - note          : String (Size: 250, Required: No, Default vuoto)
+
+3) ID: regia_config
+   - activeProfileId : String (Size: 64,   Required: Yes)
+   - payloadJson     : String (Size: 4000, Required: Yes)
+   - updatedAt       : String (Size: 40,   Required: Yes)</pre>
+        </div>
+      </div>
+
+      <div class="guide-section-block">
+        <h3><span class="step-badge">4</span> Imposta i Permessi &ldquo;Any&rdquo; su Tutte e 3 le Tabelle</h3>
+        <ol class="guide-ordered-list">
+          <li>Apri ognuna delle 3 tabelle (<code>jackpot_bank</code>, <code>unclaimed_history</code>, <code>regia_config</code>) &rarr; scheda <b>Settings</b> &rarr; sezione <b>Permissions</b>.</li>
+          <li>Clicca <b>+ Add role</b> &rarr; seleziona <b>Any</b> (All guests and users).</li>
+          <li>Spunta <b>Create</b>, <b>Read</b>, <b>Update</b> (opzionale: Delete) e clicca <b>Update</b> in basso a destra.</li>
+          <li>Torna in Console Regia &rarr; <b>Dual-DB</b> &rarr; clicca <b>Precompila (6af8bbbf...)</b> &rarr; <b>Salva &amp; Connetti Appwrite</b>.</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="online-guide-modal-footer">
+      <button type="button" class="guide-footer-btn print" id="appwriteModalPrintFooterBtn"><i class="fas fa-print"></i> Stampa Guida A4</button>
+      <button type="button" class="guide-footer-btn download" id="appwriteModalDownloadFooterBtn"><i class="fas fa-file-pdf"></i> Scarica File PDF</button>
+      <button type="button" class="guide-footer-btn close" id="appwriteModalCloseHeaderBtn">Chiudi</button>
     </div>
   </div>
 </div>

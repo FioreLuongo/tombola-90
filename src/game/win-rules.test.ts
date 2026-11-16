@@ -8,6 +8,7 @@ import {
     GamePrizesProgress,
     CartellaEntity
 } from './win-rules.js';
+import { generateCartellaNumbersForSheet } from './tombola-core.js';
 
 test('Tombola Sequential Prize Rules', async (t) => {
     // Sample cartella with numbers:
@@ -147,6 +148,34 @@ test('Tombola Sequential Prize Rules', async (t) => {
         assert.equal(res.winningNumbers.length, 15);
     });
 
+    await t.test('Tombola still triggers if a card already had all 15 numbers covered when an unrelated number is drawn later', () => {
+        const cinquinaWonProgress: GamePrizesProgress = {
+            ...initialProgress,
+            ambo: { won: true },
+            terno: { won: true },
+            quaterna: { won: true },
+            cinquina: { won: true }
+        };
+        // Unrelated number 77 was just drawn; cartellaSample already has all 15 covered
+        const all15Plus77 = [5, 12, 33, 54, 78, 8, 22, 45, 61, 89, 1, 19, 39, 58, 90, 77];
+        const res = checkSequentialWins([cartellaSample], all15Plus77, 77, cinquinaWonProgress);
+        assert.equal(res.won, true);
+        assert.equal(res.prizeType, 'tombola');
+        assert.equal(res.cartellaId, 'G1-C1-B');
+        assert.equal(res.winningNumbers.length, 15);
+    });
+
+    await t.test('Tombola never expires while un-won', () => {
+        const neverExpiredProgress: GamePrizesProgress = {
+            ambo: { won: false, expired: true },
+            terno: { won: false, expired: true },
+            quaterna: { won: false, expired: true },
+            cinquina: { won: false, expired: true },
+            tombola: { won: false, expired: true }
+        };
+        assert.equal(getCurrentActivePrize(neverExpiredProgress), 'tombola');
+    });
+
     await t.test('After Tombola is won, no further prizes are awarded', () => {
         const allWonProgress: GamePrizesProgress = {
             ambo: { won: true },
@@ -161,6 +190,50 @@ test('Tombola Sequential Prize Rules', async (t) => {
         const res = checkSequentialWins([cartellaSample], drawn, 33, allWonProgress);
         assert.equal(res.won, false);
         assert.equal(res.prizeType, null);
+    });
+
+    await t.test('Full 90-ball game simulation guarantees Tombola in every game', () => {
+        for (let trial = 0; trial < 10; trial++) {
+            const strip = generateCartellaNumbersForSheet();
+            const cards: CartellaEntity[] = strip.map((nums, idx) => ({
+                id: `TAV-G001.F01.C0${idx + 1}.Blue${idx + 1}`,
+                numbers: nums,
+                isActive: true,
+            }));
+
+            const progress: GamePrizesProgress = {
+                ambo: { won: false },
+                terno: { won: false },
+                quaterna: { won: false },
+                cinquina: { won: false },
+                tombola: { won: false },
+            };
+
+            const bag = Array.from({ length: 90 }, (_, i) => i + 1);
+            // Deterministic pseudo-shuffle per trial
+            for (let i = bag.length - 1; i > 0; i--) {
+                const j = (trial * 37 + i * 13) % (i + 1);
+                [bag[i], bag[j]] = [bag[j], bag[i]];
+            }
+
+            const drawn: number[] = [];
+            for (const num of bag) {
+                drawn.push(num);
+                const res = checkSequentialWins(cards, drawn, num, progress);
+                if (res.won && res.prizeType) {
+                    progress[res.prizeType] = {
+                        won: true,
+                        cartellaId: res.cartellaId,
+                        numbers: res.winningNumbers,
+                        winningRow: res.winningRow,
+                    };
+                }
+                if (progress.tombola.won) break;
+            }
+
+            assert.equal(progress.tombola.won, true, `Trial ${trial} must always end with a Tombola winner`);
+            assert.equal(progress.tombola.numbers?.length, 15, 'Winning Tombola must cover all 15 numbers of the card');
+        }
     });
 
     await t.test('If Tombola is not won at end of game, prize is preserved in unclaimed pot (NOT redistributed)', () => {

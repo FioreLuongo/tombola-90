@@ -9,6 +9,10 @@
           "type": "number",
           "description": "Total cumulative amount of unclaimed prizes carried over."
         },
+        "currentGameUnclaimed": {
+          "type": "number",
+          "description": "Sum of unclaimed prizes accumulated during the currently active game."
+        },
         "currency": {
           "type": "string",
           "description": "Currency symbol (€, £, $)."
@@ -186,6 +190,90 @@
         }
       },
       "required": ["id", "activeProfileId", "difficulty", "thresholds", "prizes", "updatedAt"]
+    },
+    "TavoloSetMeta": {
+      "title": "TavoloSetMeta",
+      "description": "Metadata and active sheet selection for a permanent physical table game card set (e.g. TAV-G001 with 30 A4 sheets).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "gameId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "totalSheets": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "activeSheets": {
+          "type": "array",
+          "items": { "type": "integer" }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 40
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 40
+        }
+      },
+      "required": ["id", "gameId", "name", "totalSheets", "activeSheets", "createdAt", "updatedAt"]
+    },
+    "TavoloSheetDoc": {
+      "title": "TavoloSheetDoc",
+      "description": "Single permanent A4 sheet belonging to a table game set, containing 24 native card objects (4 color strips x 6 cards).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "setId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "gameId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "sheetNumber": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "sheetLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10
+        },
+        "cards": {
+          "type": "array",
+          "description": "24 permanent Tombola 90 cards (Blue, Orange, Green, Yellow strips of 6 cards each)."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 40
+        }
+      },
+      "required": ["id", "setId", "gameId", "sheetNumber", "sheetLabel", "cards", "updatedAt"]
     }
   },
   "firestore": {
@@ -208,6 +296,14 @@
     "/regia_config/{configId}": {
       "schema": "RegiaGameConfig",
       "description": "Unified single-document store of live Regia parameters (difficulty, thresholds, prizes) preventing duplication across cards."
+    },
+    "/tavolo_sets/{setId}": {
+      "schema": "TavoloSetMeta",
+      "description": "Permanent table game sets (e.g. TAV-G001) and their currently active sheet selections."
+    },
+    "/tavolo_sets/{setId}/sheets/{sheetId}": {
+      "schema": "TavoloSheetDoc",
+      "description": "Individual A4 sheets (sheet_01..sheet_30) inside a permanent table game set."
     }
   }
 }

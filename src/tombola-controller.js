@@ -1,5 +1,29 @@
 import * as jackpotServiceModule from './firebase-jackpot-service';
 import { regiaStateManager } from './regia-state-manager';
+import {
+    clearStoredAppwriteConfig,
+    getAppwriteStatus,
+    loadStoredAppwriteConfig,
+} from './appwrite-db-service';
+import { resolveDatabaseMode } from './dual-database-service';
+import {
+    DEFAULT_TAVOLO_GAME_ID,
+    DEFAULT_TAVOLO_SHEETS_COUNT,
+    formatItalianDateTime,
+    formatSheetLabel,
+    formatTavoloSheetSerial,
+    generatePermanentTavoloSet,
+    hydrateRuntimeCartelleFromTavoloSet,
+    isCardActiveForMode,
+    listSavedTavoloSets,
+    loadPermanentTavoloSet,
+    readTavoloUiPrefs,
+    sanitizeActiveSheetsList,
+    sanitizeTavoloGameId,
+    savePermanentTavoloSet,
+    saveTavoloActiveSheetsSelection,
+    writeTavoloUiPrefs,
+} from './tavolo-cards-service';
 if (typeof window !== 'undefined' && !window.JackpotService) {
     window.JackpotService = jackpotServiceModule;
 }
@@ -25,10 +49,31 @@ function startTombolaApp() {
     let sharedAudioCtx = null;
     let speechSynthesis = window.speechSynthesis;
     let speechSupported = false;
-    let cartelleGameId = "TOM001";
+    const DEFAULT_ONLINE_GAME_ID = "TOMB-001";
+    let cartelleGameId = DEFAULT_ONLINE_GAME_ID;
     let generatedCartelle =[];
     let isPausedForWin = false;
     let aiIntelligenceEnabled = true;
+
+    // ===== STATO SEZIONE TAVOLO GIOCO & MENÙ GENERAZIONE CARTELLE =====
+    let cartellePlayMode = 'menu'; // 'menu' | 'tavolo' | 'online'
+    let effectiveCardMode = 'online'; // 'tavolo' | 'online'
+    let selectedTavoloGameId = DEFAULT_TAVOLO_GAME_ID;
+    let tavoloTotalSheets = DEFAULT_TAVOLO_SHEETS_COUNT;
+    let activeTavoloSheets = [];
+    let showOnlySelectedTavoloSheets = false;
+    let savedTavoloSetsMeta = [];
+    let currentLoadedTavoloSet = null;
+    let lastTavoloSaveSourceLabel = '';
+    let onlineWorkspace = {
+        gameId: DEFAULT_ONLINE_GAME_ID,
+        cartelle: [],
+        winningNumbersByCartella: {},
+        activeColorSheets: { blue: [], orange: [], green: [], yellow: [] },
+        participatingGiocatori: 0,
+        numGiocatori: '1',
+        startSheet: '1',
+    };
 
     // ===== VARIABILI PER IL NUMERO GOLD =====
     let numeroGold = null;
@@ -38,6 +83,10 @@ function startTombolaApp() {
 
     // ===== NUOVA VARIABILE PER IL MONTE PREMI NON VINTI =====
     let unclaimedGoldTotal = 0;
+    let pendingRolloverDepositPromise = null;
+    let currentGameRolloverArchived = false;
+    let rolloverRecalledThisGame = false;
+    let autoRecallInFlightPromise = null;
 
     // ===== CONFIGURAZIONE SOGLIE SCADENZA PREMI (BOX A REGIA) =====
     const prizeDelaysConfig = {
@@ -46,7 +95,7 @@ function startTombolaApp() {
         terno: { max: 35, expired: false, potShare: 0.10, label: 'Terno' },
         quaterna: { max: 50, expired: false, potShare: 0.15, label: 'Quaterna' },
         cinquina: { max: 65, expired: false, potShare: 0.20, label: 'Cinquina' },
-        tombola: { max: 85, expired: false, potShare: 0.45, label: 'Tombola' }
+        tombola: { max: 90, expired: false, potShare: 0.45, label: 'Tombola' }
     };
 
     // ===== ALGORITMO DIFFICOLTÀ VINCITE / ANTI-VINCITA (BOX B REGIA) =====
@@ -83,7 +132,7 @@ function startTombolaApp() {
         });
     });
 
-    // Sincronizza Montepremi e Valuta dal documento unico Firestore (regia_config/main)
+    // Sincronizza Montepremi, Valuta e Non Vinti della partita attuale dal Database Cloud
     regiaStateManager.onPrizesConfigSync((prizes) => {
         const poolInput = document.getElementById('prizePool');
         const currSelect = document.getElementById('currencySelect');
@@ -97,6 +146,15 @@ function startTombolaApp() {
         }
         if (currSelect && currSelect.value !== nextCurr) {
             currSelect.value = nextCurr;
+            changed = true;
+        }
+        if (
+            extractedNumbers.length === 0 &&
+            !currentGameRolloverArchived &&
+            typeof prizes.unclaimedCurrentGame === 'number' &&
+            Math.abs(unclaimedGoldTotal - prizes.unclaimedCurrentGame) > 0.001
+        ) {
+            unclaimedGoldTotal = prizes.unclaimedCurrentGame;
             changed = true;
         }
         if (changed) {
@@ -165,7 +223,7 @@ function startTombolaApp() {
     let gameStats = {
         startTime: null, endTime: null, totalExtractions: 0, extractedNumbers: [],
         remainingNumbers:[], durationSeconds: 0, winStats: { gold: 0, ambo: 0, terno: 0, quaterna: 0, cinquina: 0, tombola: 0 },
-        extractionSpeed: 0, gameId: "TOM001", activeCards: 0, extractionFrequency: 0,
+        extractionSpeed: 0, gameId: DEFAULT_ONLINE_GAME_ID, activeCards: 0, extractionFrequency: 0,
         extractionDensity: { low: 0, mid: 0, high: 0, display: '0/0/0%' },
         reactionTimes:[], numberDistribution: {}, hotSequences: 0, coldSequences: 0,
         tensDistribution: {}, extractionEfficiency: 0, lastWinTime: null,
@@ -399,6 +457,7 @@ function startTombolaApp() {
     }
 
     function isGiocatoreParticipating(playerNumber) {
+        if (effectiveCardMode === 'tavolo') return true;
         if (participatingGiocatori === 0) return true;
         return playerNumber <= participatingGiocatori;
     }
@@ -412,18 +471,142 @@ function startTombolaApp() {
 
     function isCartellaActive(cartellaId) {
         const cartella = generatedCartelle.find(c => c.id === cartellaId);
-        if (!cartella || !cartella.colorType) return false;
-        if (!isGiocatoreParticipating(cartella.playerNumber)) return false;
-        return isColorActive(cartella.colorType);
+        return isCardActiveForMode({
+            card: cartella,
+            mode: effectiveCardMode,
+            selectedTavoloGameId,
+            activeTavoloSheets,
+            participatingGiocatori,
+            isColorActive
+        });
     }
 
-    // ===== FUNZIONI PER IL NUOVO BOX MONTEPREMI NON VINTI =====
+    // ===== FUNZIONI PER IL NUOVO BOX MONTEPREMI NON VINTI (LIVE + ROLLOVER) =====
     function updateUnclaimedPotDisplay() {
         const currency = document.getElementById('currencySelect')?.value || '€';
         regiaStateManager.syncPrizesState({
             unclaimedCurrentGame: unclaimedGoldTotal,
             currency,
         });
+    }
+
+    function persistCurrentGameUnclaimedToDb() {
+        const currency = document.getElementById('currencySelect')?.value || '€';
+        void regiaStateManager.saveCurrentGameUnclaimedToCloud(unclaimedGoldTotal, currency);
+    }
+
+    function archiveCurrentGameUnclaimedOnEnd(reasonLabel = 'Fine partita') {
+        const autoSaveToggle = document.getElementById('regiaAutoSaveCloudToggle');
+        const shouldAutoSave = autoSaveToggle ? autoSaveToggle.checked : true;
+        if (!shouldAutoSave || unclaimedGoldTotal <= 0 || currentGameRolloverArchived) {
+            return Promise.resolve(null);
+        }
+
+        currentGameRolloverArchived = true;
+        const amountToSave = Math.round(unclaimedGoldTotal * 100) / 100;
+        const currency = document.getElementById('currencySelect')?.value || '€';
+        const gameId = cartelleGameId || document.getElementById('gameId')?.value || DEFAULT_ONLINE_GAME_ID;
+
+        unclaimedGoldTotal = 0;
+        updateUnclaimedPotDisplay();
+        if (window.TombolaSync) {
+            window.TombolaSync.broadcastUnclaimedUpdate(0);
+        }
+
+        const depositTask = regiaStateManager.depositUnclaimedToFirestore(
+            amountToSave,
+            currency,
+            'all',
+            gameId,
+            `${reasonLabel} (${gameId})`
+        ).then((res) => {
+            if (res.success) {
+                logRegiaEvent(`💾 Accumulati ${currency} ${amountToSave.toFixed(2)} nel Totale Database (${reasonLabel}).`, 'success');
+            }
+            return res;
+        }).catch((err) => {
+            console.warn('Auto-accumulate unclaimed error:', err);
+            return null;
+        }).finally(() => {
+            if (pendingRolloverDepositPromise === depositTask) {
+                pendingRolloverDepositPromise = null;
+            }
+        });
+
+        pendingRolloverDepositPromise = depositTask;
+        return depositTask;
+    }
+
+    async function maybeAutoRecallBankIntoNextGame(triggerSource = 'next_game') {
+        const autoRecallToggle = document.getElementById('regiaAutoRecallCloudToggle');
+        if (autoRecallToggle && !autoRecallToggle.checked) return 0;
+        if (rolloverRecalledThisGame || extractedNumbers.length > 0) return 0;
+        if (autoRecallInFlightPromise) return autoRecallInFlightPromise;
+
+        const hasPendingDeposit = Boolean(pendingRolloverDepositPromise);
+        const currentBalance = Number(regiaStateManager.getState().cloudBank.balance) || 0;
+        if (!hasPendingDeposit && currentBalance <= 0) {
+            return 0;
+        }
+
+        autoRecallInFlightPromise = (async () => {
+            try {
+                if (pendingRolloverDepositPromise) {
+                    await pendingRolloverDepositPromise.catch(() => null);
+                }
+
+                const bankState = regiaStateManager.getState().cloudBank;
+                const availableBalance = Number(bankState.balance) || 0;
+                if (availableBalance <= 0 || rolloverRecalledThisGame || extractedNumbers.length > 0) {
+                    return 0;
+                }
+
+                const gameId = cartelleGameId || document.getElementById('gameId')?.value || DEFAULT_ONLINE_GAME_ID;
+                const currency = bankState.currency || document.getElementById('currencySelect')?.value || '€';
+                rolloverRecalledThisGame = true;
+
+                const res = await regiaStateManager.recallUnclaimedFromFirestore(
+                    availableBalance,
+                    gameId,
+                    `Auto-richiamo partita successiva (${triggerSource})`
+                );
+
+                if (res.success && res.recalledAmount > 0) {
+                    const poolInput = document.getElementById('prizePool');
+                    const regiaPoolInput = document.getElementById('regiaPrizePoolInput');
+                    const currentPool = parseFloat(poolInput?.value || '0') || 0;
+                    const newPool = Math.round((currentPool + res.recalledAmount) * 100) / 100;
+
+                    if (poolInput) poolInput.value = newPool.toFixed(2);
+                    if (regiaPoolInput) regiaPoolInput.value = newPool.toFixed(2);
+
+                    updatePrizes();
+                    syncRegiaUI();
+
+                    const tvBadge = document.getElementById('tvRolloverBadge');
+                    const tvText = document.getElementById('tvRolloverText');
+                    if (tvBadge && tvText) {
+                        tvBadge.style.display = 'inline-flex';
+                        tvText.textContent = `Include ${currency} ${res.recalledAmount.toFixed(2)} da partite precedenti`;
+                    }
+
+                    void regiaStateManager.syncRegiaCardsWithFirestore({ immediate: true, source: 'auto_recall' });
+                    if (window.TombolaSync) {
+                        window.TombolaSync.broadcastPrizePoolUpdate(newPool, currency);
+                    }
+
+                    logRegiaEvent(`💰 Auto-richiamati ${currency} ${res.recalledAmount.toFixed(2)} dal Totale Database nel Montepremi della partita!`, 'success');
+                    return res.recalledAmount;
+                } else {
+                    rolloverRecalledThisGame = false;
+                }
+                return 0;
+            } finally {
+                autoRecallInFlightPromise = null;
+            }
+        })();
+
+        return autoRecallInFlightPromise;
     }
 
     // ===== FUNZIONI PER IL NUMERO GOLD =====
@@ -481,8 +664,10 @@ function startTombolaApp() {
             showGoldExpiredNotification(goldPrizeAmount);
         }
 
-        // 2. Controllo Scadenza Combinazioni (Ambo, Terno, Quaterna, Cinquina, Tombola)
-        const prizeKeys = ['ambo', 'terno', 'quaterna', 'cinquina', 'tombola'];
+        // 2. Controllo Scadenza Combinazioni intermedie (Ambo, Terno, Quaterna, Cinquina)
+        // La Tombola (tutti i 15 numeri di una cartella) NON scade mai: deve esserci sempre una Tombola ad ogni gioco.
+        prizeDelaysConfig.tombola.expired = false;
+        const prizeKeys = ['ambo', 'terno', 'quaterna', 'cinquina'];
         prizeKeys.forEach(k => {
             const conf = prizeDelaysConfig[k];
             if (!conf) return;
@@ -499,8 +684,13 @@ function startTombolaApp() {
         });
 
         if (newExpired) {
+            currentGameRolloverArchived = false;
             updateUnclaimedPotDisplay();
             syncRegiaUI();
+            persistCurrentGameUnclaimedToDb();
+            if (window.TombolaSync) {
+                window.TombolaSync.broadcastUnclaimedUpdate(unclaimedGoldTotal);
+            }
         }
     }
 
@@ -597,7 +787,7 @@ function startTombolaApp() {
 
     function handleGameEndWithoutTombola() {
         // Se non ci sono vincite per la tombola, il premio NON deve essere ridistribuito.
-        // Deve andare direttamente nel montepremi non vinti!
+        // Va nei Non Vinti e, se Auto-accumulo è attivo, viene subito accumulato nel Totale Database per la partita successiva!
         const prizePool = parseFloat(document.getElementById('prizePool').value) || 0;
         const currency = document.getElementById('currencySelect').value || '€';
 
@@ -605,17 +795,25 @@ function startTombolaApp() {
             prizeDelaysConfig.tombola.expired = true;
             const tombolaPrizeAmt = prizePool * (prizeDelaysConfig.tombola.potShare || 0.45);
             unclaimedGoldTotal += tombolaPrizeAmt;
-            logRegiaEvent(`⚠️ Partita terminata senza Tombola: premio di ${currency} ${tombolaPrizeAmt.toFixed(2)} accantonato in Montepremi Non Vinti (NON ridistribuito).`, 'warn');
+            currentGameRolloverArchived = false;
+            logRegiaEvent(`⚠️ Partita terminata senza Tombola: premio di ${currency} ${tombolaPrizeAmt.toFixed(2)} aggiunto a Non Vinti Partita Attuale.`, 'warn');
         }
 
+        const totalUnclaimedThisGame = Math.round(unclaimedGoldTotal * 100) / 100;
         updateUnclaimedPotDisplay();
         syncRegiaUI();
 
-        if (window.TombolaSync) {
-            window.TombolaSync.broadcastUnclaimedUpdate(unclaimedGoldTotal);
+        const autoSaveToggle = document.getElementById('regiaAutoSaveCloudToggle');
+        if (autoSaveToggle && autoSaveToggle.checked && totalUnclaimedThisGame > 0) {
+            void archiveCurrentGameUnclaimedOnEnd('Fine partita senza Tombola');
+            showUnclaimedPreservedPopup(totalUnclaimedThisGame, true);
+        } else {
+            persistCurrentGameUnclaimedToDb();
+            if (window.TombolaSync) {
+                window.TombolaSync.broadcastUnclaimedUpdate(unclaimedGoldTotal);
+            }
+            showUnclaimedPreservedPopup(totalUnclaimedThisGame, false);
         }
-
-        showUnclaimedPreservedPopup();
     }
 
     // Compatibilità: reindirizza qualsiasi chiamata residua a non ridistribuire
@@ -644,7 +842,7 @@ function startTombolaApp() {
         playSound('win');
     }
 
-    function showUnclaimedPreservedPopup() {
+    function showUnclaimedPreservedPopup(savedAmount = unclaimedGoldTotal, wasArchivedToDb = false) {
         const popup = document.getElementById('winPopup');
         const title = document.getElementById('winPopupTitle');
         const details = document.getElementById('winPopupDetails');
@@ -654,21 +852,22 @@ function startTombolaApp() {
 
         if (!popup || !title || !details || !winNumbers || !cartellaIdElement || !winners) return;
         const currency = document.getElementById('currencySelect').value || '€';
+        const displayAmount = Number(savedAmount) || 0;
 
         title.textContent = currentLanguage === 'it' ? 'PARTITA TERMINATA SENZA TOMBOLA' : 'GAME ENDED WITHOUT TOMBOLA';
         details.innerHTML = currentLanguage === 'it'
             ? `<div style="font-size: 14px; line-height: 1.6; color: #f8fafc;">
                  Nessuna cartella ha realizzato la <b>Tombola</b>.<br>
-                 <span style="color: #facc15; font-weight: bold;">Il premio non viene ridistribuito</span>, ma è stato accantonato nel <b>Montepremi Non Vinti</b> per le prossime partite!
+                 <span style="color: #facc15; font-weight: bold;">Il premio non viene ridistribuito</span>, ma ${wasArchivedToDb ? 'è stato accumulato nel <b>Totale Database</b> per essere richiamato nella prossima partita!' : 'resta accantonato nel <b>Montepremi Non Vinti</b>!'}
                </div>`
             : `<div style="font-size: 14px; line-height: 1.6; color: #f8fafc;">
                  No card achieved <b>Tombola</b>.<br>
-                 <span style="color: #facc15; font-weight: bold;">The prize is not redistributed</span>; it has been saved to the <b>Unclaimed Prize Pool</b> for upcoming games!
+                 <span style="color: #facc15; font-weight: bold;">The prize is not redistributed</span>; it has been saved to the <b>Database Jackpot Total</b> for the next game!
                </div>`;
         winNumbers.textContent = '';
         cartellaIdElement.style.display = 'none';
         winners.innerHTML = `<div style="font-size: 16px; font-weight: 900; color: #22c55e; margin-top: 10px;">
-            ${currentLanguage === 'it' ? 'Saldo Attuale Montepremi Non Vinti:' : 'Current Unclaimed Pool:'} ${currency} ${unclaimedGoldTotal.toFixed(2)}
+            ${currentLanguage === 'it' ? (wasArchivedToDb ? 'Accumulato nel Totale Database:' : 'Saldo Attuale Montepremi Non Vinti:') : 'Saved to Unclaimed Pool:'} ${currency} ${displayAmount.toFixed(2)}
         </div>`;
 
         popup.style.display = 'flex';
@@ -965,9 +1164,22 @@ function startTombolaApp() {
             showErrorPopup(currentLanguage === 'it' ? "Generare le cartelle prima di iniziare." : "Generate cards before starting.");
             return false;
         }
+        if (effectiveCardMode === 'tavolo' && activeTavoloSheets.length === 0) {
+            showErrorPopup(currentLanguage === 'it'
+                ? "Seleziona almeno un Foglio in gioco nella sezione Tavolo prima di iniziare."
+                : "Select at least one active sheet in Table mode before starting.");
+            return false;
+        }
         const hasActiveSheet = Object.values(activeColorSheets).some(sheets => sheets.some(s => s.active));
         if (!hasActiveSheet) {
             showErrorPopup(currentLanguage === 'it' ? "Attivare almeno un foglio colore per iniziare." : "Activate at least one color sheet to start.");
+            return false;
+        }
+        const activeCardsCount = generatedCartelle.filter(c => isCartellaActive(c.id)).length;
+        if (activeCardsCount === 0) {
+            showErrorPopup(currentLanguage === 'it'
+                ? "Nessuna cartella attiva in gioco. Seleziona almeno un foglio o colore per iniziare."
+                : "No active cards in play. Activate at least one sheet or color to start.");
             return false;
         }
         return true;
@@ -1088,7 +1300,7 @@ function startTombolaApp() {
         });
     }
 
-    function updateColorSheetsFromCartelle() {
+    function updateColorSheetsFromCartelle(activateAllColors = false) {
         activeColorSheets = { blue: [], orange: [], green: [], yellow:[] };
         generatedCartelle.forEach(cartella => {
             const colorType = cartella.colorType;
@@ -1096,7 +1308,7 @@ function startTombolaApp() {
             if (colorType && activeColorSheets[colorType]) {
                 const existing = activeColorSheets[colorType].find(s => s.code === colorCode);
                 if (existing) existing.count++;
-                else activeColorSheets[colorType].push({ code: colorCode, active: false, count: 1 });
+                else activeColorSheets[colorType].push({ code: colorCode, active: Boolean(activateAllColors), count: 1 });
             }
         });
         initColorControls();
@@ -1373,24 +1585,39 @@ function startTombolaApp() {
         const sortedSheets = Object.keys(fogliMap).sort((a,b) => a - b);
 
         sortedSheets.forEach(sheetNumber => {
+            const sheetNumInt = parseInt(sheetNumber, 10) || 1;
+            const sheetLabel = formatSheetLabel(sheetNumInt);
+            const isTavoloMode = effectiveCardMode === 'tavolo';
+            const isSheetSelected = !isTavoloMode || activeTavoloSheets.includes(sheetNumInt);
             const cartelleInSheet = fogliMap[sheetNumber].sort((a,b) => a.cartellaNumber - b.cartellaNumber);
             const foglio = document.createElement('div');
             foglio.className = 'foglio-a4 jumbo-sheet';
+            foglio.dataset.sheetNumber = String(sheetNumInt);
 
-            const firstCartella = cartelleInSheet[0];
+            if (isTavoloMode && !isSheetSelected) {
+                foglio.classList.add('sheet-excluded');
+                if (showOnlySelectedTavoloSheets) {
+                    foglio.classList.add('sheet-hidden-by-filter');
+                }
+            }
+
             const foglioHeader = document.createElement('div');
             foglioHeader.className = 'foglio-header jumbo-sheet-header';
 
             const titleBox = document.createElement('div');
             titleBox.className = 'foglio-title';
-            titleBox.innerHTML = `<div class="sheet-official-logo"><span class="sheet-logo-dice">🎲</span><span class="sheet-logo-title">LUONGO TOMBOLA 90 ITALIA</span><span class="sheet-logo-gold">GOLD EDITION</span></div><span class="jumbo-badge-4col">4 COLORI &bull; 24 CARTELLE</span>`;
+            titleBox.innerHTML = `<div class="sheet-official-logo"><span class="sheet-logo-dice">🎲</span><span class="sheet-logo-title">Tombola 90</span></div><div class="foglio-number-badge">FOGLIO ${sheetLabel}</div>`;
 
             const info = document.createElement('div');
             info.className = 'foglio-info';
-            info.innerHTML = `<span>${currentLanguage === 'it' ? 'Gioco' : 'Game'}: <b>${cartelleGameId}</b></span>
-                            <span>${currentLanguage === 'it' ? 'Foglio' : 'Sheet'}: <b>${sheetNumber}</b></span>
-                            <span>${currentLanguage === 'it' ? 'Giocatore' : 'Player'}: <b>${firstCartella ? firstCartella.playerNumber : 1}</b></span>
-                            <span><b>90 NUMERI</b> (SERIE DA 6 PER STRISCIA)</span>`;
+            if (isTavoloMode) {
+                const serialCode = formatTavoloSheetSerial(cartelleGameId, sheetNumInt);
+                info.innerHTML = `<span class="sheet-serial-badge">N° Serie: <b>${serialCode}</b></span>`;
+            } else {
+                info.innerHTML = `<span>${currentLanguage === 'it' ? 'Gioco' : 'Game'}: <b>${cartelleGameId}</b></span>
+                            <span>${currentLanguage === 'it' ? 'Foglio' : 'Sheet'}: <b>${sheetLabel}</b></span>
+                            <span><b>24 CARTELLE</b> (4 COLORI &bull; 90 NUMERI)</span>`;
+            }
 
             foglioHeader.appendChild(titleBox);
             foglioHeader.appendChild(info);
@@ -1425,7 +1652,7 @@ function startTombolaApp() {
                     cartella.dataset.card = cartellaData.cartellaNumber;
                     cartella.dataset.player = cartellaData.playerNumber;
 
-                    if (!isGiocatoreParticipating(cartellaData.playerNumber)) {
+                    if (!isTavoloMode && !isGiocatoreParticipating(cartellaData.playerNumber)) {
                         cartella.classList.add('non-participating');
                         cartella.style.opacity = '0.6';
                         cartella.style.borderStyle = 'dashed';
@@ -1501,10 +1728,10 @@ function startTombolaApp() {
                     strip.appendChild(cartella);
                 });
 
-                // Watermark footer della striscia (GOLD EDITION © e SERIE)
+                // Watermark footer della striscia
                 const stripFooter = document.createElement('div');
                 stripFooter.className = 'jumbo-strip-footer';
-                stripFooter.innerHTML = `<span>SERIE ${colorLabel.toUpperCase()} (1-90)</span><span>GOLD EDITION &copy;</span>`;
+                stripFooter.innerHTML = `<span>SERIE ${colorLabel.toUpperCase()} (1-90)</span><span>TOMBOLA 90</span>`;
                 strip.appendChild(stripFooter);
 
                 return strip;
@@ -1530,9 +1757,23 @@ function startTombolaApp() {
         document.getElementById('totalCartelle').textContent = generatedCartelle.length;
         const uniqueSheets = new Set(generatedCartelle.map(c => c.sheetNumber));
         document.getElementById('totalFogli').textContent = uniqueSheets.size;
-        const uniquePlayers = new Set(generatedCartelle.map(c => c.playerNumber));
-        document.getElementById('totalGiocatori').textContent = uniquePlayers.size;
-        document.getElementById('totalParticipatingGiocatori').textContent = participatingGiocatori;
+
+        const thirdLabel = document.getElementById('total-giocatori-label');
+        const fourthLabel = document.getElementById('total-participating-label');
+
+        if (effectiveCardMode === 'tavolo') {
+            const activeCardsCount = generatedCartelle.filter(c => isCartellaActive(c.id)).length;
+            document.getElementById('totalGiocatori').textContent = activeTavoloSheets.length;
+            document.getElementById('totalParticipatingGiocatori').textContent = activeCardsCount;
+            if (thirdLabel) thirdLabel.textContent = 'Fogli in Gioco';
+            if (fourthLabel) fourthLabel.textContent = 'Cartelle Controllate';
+        } else {
+            const uniquePlayers = new Set(generatedCartelle.map(c => c.playerNumber));
+            document.getElementById('totalGiocatori').textContent = uniquePlayers.size;
+            document.getElementById('totalParticipatingGiocatori').textContent = participatingGiocatori;
+            if (thirdLabel) thirdLabel.textContent = currentLanguage === 'it' ? 'Giocatori' : 'Players';
+            if (fourthLabel) fourthLabel.textContent = currentLanguage === 'it' ? 'Partecipanti' : 'Participants';
+        }
     }
 
     function updateCartelleExtractedNumbers() {
@@ -1840,7 +2081,9 @@ function startTombolaApp() {
 
     function generateCartelle() {
         try {
-            const gameId = document.getElementById('gameId').value || "TOM001";
+            effectiveCardMode = 'online';
+            writeTavoloUiPrefs({ mode: 'online' });
+            const gameId = (document.getElementById('gameId').value || DEFAULT_ONLINE_GAME_ID).trim();
             const numGiocatori = parseInt(document.getElementById('numGiocatori').value) || 1;
             const startSheet = parseInt(document.getElementById('startSheet').value) || 1;
             participatingGiocatori = parseInt(document.getElementById('participatingGiocatori').value) || 0;
@@ -1890,6 +2133,7 @@ function startTombolaApp() {
             if (generatedCartelle.length > 0) {
                 getGoldNumberForExtraction();
             }
+            snapshotOnlineWorkspace();
 
             showSuccessPopup(currentLanguage === 'it' ?
                 `Generazione completata! Cartelle: ${generatedCartelle.length} (4 strisce x 6 cartelle = 24 per foglio) | Fogli: ${new Set(generatedCartelle.map(c => c.sheetNumber)).size} | Giocatori: ${numGiocatori}` :
@@ -1952,33 +2196,31 @@ function startTombolaApp() {
         goldExpired = false;
         goldWinningCartella = null;
 
-        const autoSaveToggle = document.getElementById('regiaAutoSaveCloudToggle');
-        if (autoSaveToggle && autoSaveToggle.checked && unclaimedGoldTotal > 0) {
-            const amountToSave = unclaimedGoldTotal;
-            const currency = document.getElementById('currencySelect')?.value || '€';
-            const gameId = document.getElementById('gameId')?.value || 'TOM001';
-            regiaStateManager.depositUnclaimedToFirestore(
-                amountToSave,
-                currency,
-                'all',
-                gameId,
-                `Auto-salvataggio fine partita ${gameId}`
-            ).then(res => {
-                if (res.success) {
-                    logRegiaEvent(`💾 Auto-salvati ${currency} ${amountToSave.toFixed(2)} nel Database Cloud (Partita ${gameId}).`, 'success');
-                }
-            }).catch(e => console.warn('Auto-save error:', e));
-        }
+        void archiveCurrentGameUnclaimedOnEnd('Reset cartelle');
         unclaimedGoldTotal = 0;
+        currentGameRolloverArchived = false;
+        rolloverRecalledThisGame = false;
         updateUnclaimedPotDisplay();
 
         const tvBadge = document.getElementById('tvRolloverBadge');
         if (tvBadge) tvBadge.style.display = 'none';
 
-        document.getElementById('gameId').value = "TOM001";
+        document.getElementById('gameId').value = DEFAULT_ONLINE_GAME_ID;
         document.getElementById('numGiocatori').value = "1";
         document.getElementById('startSheet').value = "1";
         document.getElementById('participatingGiocatori').value = "0";
+        if (effectiveCardMode === 'online') {
+            cartelleGameId = DEFAULT_ONLINE_GAME_ID;
+            onlineWorkspace = {
+                gameId: DEFAULT_ONLINE_GAME_ID,
+                cartelle: [],
+                winningNumbersByCartella: {},
+                activeColorSheets: { blue: [], orange: [], green: [], yellow: [] },
+                participatingGiocatori: 0,
+                numGiocatori: '1',
+                startSheet: '1',
+            };
+        }
 
         const container = document.getElementById('cartelleContainer');
         if (container) container.innerHTML = '';
@@ -2119,9 +2361,10 @@ function startTombolaApp() {
     }
 
     async function exportToPDF() {
-        const fogli = document.querySelectorAll('.foglio-a4');
+        const allFogli = Array.from(document.querySelectorAll('.foglio-a4'));
+        const fogli = allFogli.filter(el => !el.classList.contains('sheet-hidden-by-filter'));
         if (fogli.length === 0) {
-            showErrorPopup(currentLanguage === 'it' ? 'Nessuna cartella generata' : 'No cards generated');
+            showErrorPopup(currentLanguage === 'it' ? 'Nessuna cartella selezionata da esportare' : 'No cards generated');
             return;
         }
 
@@ -2129,9 +2372,9 @@ function startTombolaApp() {
             const { jsPDF } = window.jspdf;
             const pdf = new jsPDF('l', 'mm', 'a4');
             const gameId = cartelleGameId;
-            const numCartelle = generatedCartelle.length;
+            const numCartelle = fogli.length * 24;
             const timestamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
-            const fileName = `Tombola_Gold_${gameId}_${numCartelle}Cartelle_${timestamp}.pdf`;
+            const fileName = `Tombola90_${gameId}_${fogli.length}Fogli_${timestamp}.pdf`;
 
             const waitingMsg = document.createElement('div');
             waitingMsg.id = 'pdf-waiting-msg';
@@ -2154,17 +2397,20 @@ function startTombolaApp() {
             pdf.rect(0,0,297,210,'F');
             pdf.setTextColor(255,255,255);
             pdf.setFont('helvetica','bold');
-            pdf.setFontSize(26);
-            pdf.text('LUONGO TOMBOLA 90 ITALIA - GOLD EDITION',148.5,45,null,null,'center');
+            pdf.setFontSize(28);
+            pdf.text('TOMBOLA 90',148.5,45,null,null,'center');
             pdf.setFontSize(20);
-            pdf.text(cartelleGameId,148.5,70,null,null,'center');
+            const coverSubtitle = effectiveCardMode === 'tavolo'
+                ? `Serie: ${formatTavoloSheetSerial(cartelleGameId, 1)} — ${formatTavoloSheetSerial(cartelleGameId, tavoloTotalSheets)}`
+                : cartelleGameId;
+            pdf.text(coverSubtitle,148.5,70,null,null,'center');
             pdf.setFontSize(16);
             pdf.text(`Cartelle generate: ${numCartelle} (24 per foglio A4)`,148.5,95,null,null,'center');
             pdf.text(`Fogli A4: ${fogli.length}`,148.5,110,null,null,'center');
             pdf.text(`Colori: Blu, Arancione, Verde, Giallo (6 cartelle per striscia)`,148.5,125,null,null,'center');
             pdf.text(`Data: ${new Date().toLocaleDateString('it-IT')}`,148.5,145,null,null,'center');
             pdf.setFontSize(12);
-            pdf.text('Generato con LUONGO Tombola 90 Italia',148.5,190,null,null,'center');
+            pdf.text('Generato con Tombola 90',148.5,190,null,null,'center');
 
             for (let i = 0; i < fogli.length; i++) {
                 if (waitingMsg) waitingMsg.innerHTML = currentLanguage === 'it' ?
@@ -2344,7 +2590,7 @@ function startTombolaApp() {
         const sequence = ['ambo', 'terno', 'quaterna', 'cinquina', 'tombola'];
         for (const prize of sequence) {
             const isWon = cartelleWins[prize] && cartelleWins[prize].won;
-            const isExpired = prizeDelaysConfig[prize] && prizeDelaysConfig[prize].expired;
+            const isExpired = prize !== 'tombola' && prizeDelaysConfig[prize] && prizeDelaysConfig[prize].expired;
             if (!isWon && !isExpired) {
                 return prize;
             }
@@ -2352,9 +2598,32 @@ function startTombolaApp() {
         return null;
     }
 
+    function awardTombolaOnCartella(cartella) {
+        if (!cartella || cartelleWins.tombola.won) return null;
+        const coveredNumbers = cartella.extractedNumbers.slice();
+        cartella.wins.tombola = true;
+        cartella.winningRow = -1;
+        cartella.winningNumbers = coveredNumbers;
+        winningNumbersByCartella[cartella.id] = coveredNumbers;
+        cartelleWins.tombola.won = true;
+        cartelleWins.tombola.cartellaId = cartella.id;
+        cartelleWins.tombola.winningRow = -1;
+        cartelleWins.tombola.numbers = coveredNumbers;
+        cartelleWins.tombola.extractionCount = extractedNumbers.length;
+        cartelleWins.tombola.gameEnded = true;
+        cartelleWins.tombola.winCount++;
+        gameStats.lastWinTime = Date.now();
+        return {
+            winningType: 'tombola',
+            winningCartellaIds: [cartella.id],
+            winningNumbers: coveredNumbers,
+            winningRowIndex: -1,
+        };
+    }
+
     function checkCartelleWinsAdvanced(newNumber) {
         let newWins = false;
-        let winningType = null, winningCartellaIds =[], winningNumbers =[];
+        let winningType = null, winningCartellaIds = [], winningNumbers = [];
 
         if (newNumber === numeroGold) {
             applyGoldExtractedVisual();
@@ -2388,103 +2657,123 @@ function startTombolaApp() {
             }
         }
 
-        // 1. Aggiorna extractedNumbers su tutte le cartelle attive che contengono newNumber
+        // 1. Sincronizza tutti i numeri estratti su tutte le cartelle attive
+        const extractedSet = new Set(extractedNumbers);
+        const activeCartelle = [];
         generatedCartelle.forEach(cartella => {
             if (!isCartellaActive(cartella.id)) return;
-            const hasNum = cartella.numbers.some(n => n.number === newNumber);
-            if (hasNum && !cartella.extractedNumbers.includes(newNumber)) {
-                cartella.extractedNumbers.push(newNumber);
-            }
+            cartella.extractedNumbers = cartella.numbers
+                .map(n => n.number)
+                .filter(num => extractedSet.has(num));
+            activeCartelle.push(cartella);
         });
 
         // 2. Regole Ufficiali Tombola - Verifica sequenziale crescente: Ambo -> Terno -> Quaterna -> Cinquina -> Tombola
+        prizeDelaysConfig.tombola.expired = false;
         const activePrize = getSequentialActivePrize();
         let winningRowIndex = null;
 
-        if (activePrize) {
-            for (let cIdx = 0; cIdx < generatedCartelle.length; cIdx++) {
-                const cartella = generatedCartelle[cIdx];
-                if (!isCartellaActive(cartella.id)) continue;
-                if (!cartella.numbers.some(n => n.number === newNumber)) continue;
+        if (activePrize === 'tombola') {
+            // Tutti i 15 numeri di una cartella coperti = TOMBOLA!
+            // Controlla tutte le cartelle attive (anche se una cartella aveva già completato 15/15 prima che terminasse la Cinquina)
+            const tombolaCandidates = activeCartelle.filter(cartella =>
+                !cartella.wins.tombola &&
+                !cartelleWins.tombola.won &&
+                cartella.numbers.length > 0 &&
+                cartella.extractedNumbers.length >= cartella.numbers.length
+            );
 
-                if (activePrize === 'tombola') {
-                    if (!cartella.wins.tombola && cartella.extractedNumbers.length === 15 && !cartelleWins.tombola.won) {
-                        if (prizeDelaysConfig.tombola.expired) {
-                            cartella.wins.tombola = true;
-                            logRegiaEvent(`Tombola completata su cartella #${cartella.id}, ma premio Tombola SCADUTO (andato a Non Vinti).`, 'warn');
+            if (tombolaCandidates.length > 0) {
+                const winnerCartella =
+                    tombolaCandidates.find(c => c.numbers.some(n => n.number === newNumber)) ||
+                    tombolaCandidates[0];
+                const tombolaRes = awardTombolaOnCartella(winnerCartella);
+                if (tombolaRes) {
+                    winningType = tombolaRes.winningType;
+                    winningCartellaIds = tombolaRes.winningCartellaIds;
+                    winningNumbers = tombolaRes.winningNumbers;
+                    winningRowIndex = tombolaRes.winningRowIndex;
+                    newWins = true;
+                }
+            }
+        } else if (activePrize) {
+            // Premi di riga: ambo (2), terno (3), quaterna (4), cinquina (5)
+            const requiredCount = activePrize === 'ambo' ? 2 :
+                                  activePrize === 'terno' ? 3 :
+                                  activePrize === 'quaterna' ? 4 : 5;
+            const minTarget = antiWinDifficultyConfig.enabled ? (antiWinDifficultyConfig.forcedMin[activePrize] || 0) : 0;
+            const maxPrevented = activePrize === 'ambo' ? 4 : activePrize === 'terno' ? 4 : activePrize === 'quaterna' ? 5 : 6;
+
+            // Prima verifica le cartelle che contengono newNumber, poi (se superata la soglia minima) eventuali cartelle già pronte
+            const orderedCandidates = extractedNumbers.length >= minTarget
+                ? [
+                    ...activeCartelle.filter(c => c.numbers.some(n => n.number === newNumber)),
+                    ...activeCartelle.filter(c => !c.numbers.some(n => n.number === newNumber)),
+                  ]
+                : activeCartelle.filter(c => c.numbers.some(n => n.number === newNumber));
+
+            for (let cIdx = 0; cIdx < orderedCandidates.length; cIdx++) {
+                const cartella = orderedCandidates[cIdx];
+                const hasNew = cartella.numbers.some(n => n.number === newNumber);
+
+                let prizeAwarded = false;
+                for (let row = 0; row < 3; row++) {
+                    const rowNumbers = cartella.numbers.filter(n => n.row === row).map(n => n.number);
+                    if (hasNew && extractedNumbers.length < minTarget && !rowNumbers.includes(newNumber)) continue;
+
+                    const extractedInRow = rowNumbers.filter(n => extractedSet.has(n));
+                    if (extractedInRow.length >= requiredCount && !cartella.wins[activePrize] && !cartelleWins[activePrize].won) {
+                        if (prizeDelaysConfig[activePrize].expired) {
+                            cartella.wins[activePrize] = true;
+                            logRegiaEvent(`${activePrize.toUpperCase()} su cartella #${cartella.id}, ma premio SCADUTO (andato a Montepremi Non Vinti).`, 'warn');
                         } else {
-                            const minTarget = antiWinDifficultyConfig.enabled ? antiWinDifficultyConfig.forcedMin.tombola : 0;
-                            if (extractedNumbers.length >= minTarget || cartelleWins.tombola.preventedCount > 7) {
-                                cartella.wins.tombola = true;
-                                cartella.winningRow = -1;
-                                cartella.winningNumbers = cartella.extractedNumbers.slice();
-                                winningNumbersByCartella[cartella.id] = cartella.extractedNumbers.slice();
-                                cartelleWins.tombola.won = true;
-                                cartelleWins.tombola.cartellaId = cartella.id;
-                                cartelleWins.tombola.winningRow = -1;
-                                cartelleWins.tombola.numbers = cartella.extractedNumbers.slice();
-                                cartelleWins.tombola.extractionCount = extractedNumbers.length;
-                                cartelleWins.tombola.gameEnded = true;
-                                cartelleWins.tombola.winCount++;
-                                winningType = 'tombola';
+                            if (extractedNumbers.length >= minTarget || cartelleWins[activePrize].preventedCount > maxPrevented) {
+                                const wonNums = extractedInRow.slice(0, requiredCount);
+                                cartella.wins[activePrize] = true;
+                                cartella.winningRow = row;
+                                cartella.winningNumbers = wonNums;
+                                winningNumbersByCartella[cartella.id] = wonNums;
+                                cartelleWins[activePrize].won = true;
+                                cartelleWins[activePrize].cartellaId = cartella.id;
+                                cartelleWins[activePrize].winningRow = row;
+                                cartelleWins[activePrize].numbers = wonNums;
+                                cartelleWins[activePrize].extractionCount = extractedNumbers.length;
+                                cartelleWins[activePrize].winCount++;
+                                winningType = activePrize;
                                 winningCartellaIds.push(cartella.id);
-                                winningNumbers = cartella.extractedNumbers.slice();
-                                winningRowIndex = -1;
+                                winningNumbers = wonNums;
+                                winningRowIndex = row;
                                 newWins = true;
                                 gameStats.lastWinTime = Date.now();
+                                prizeAwarded = true;
                                 break;
                             } else {
-                                cartelleWins.tombola.preventedCount++;
+                                cartelleWins[activePrize].preventedCount++;
                             }
                         }
                     }
-                } else {
-                    // Premi di riga: ambo (2), terno (3), quaterna (4), cinquina (5)
-                    const requiredCount = activePrize === 'ambo' ? 2 :
-                                          activePrize === 'terno' ? 3 :
-                                          activePrize === 'quaterna' ? 4 : 5;
-
-                    let prizeAwarded = false;
-                    for (let row = 0; row < 3; row++) {
-                        const rowNumbers = cartella.numbers.filter(n => n.row === row).map(n => n.number);
-                        if (!rowNumbers.includes(newNumber)) continue;
-
-                        const extractedInRow = rowNumbers.filter(n => extractedNumbers.includes(n));
-                        if (extractedInRow.length >= requiredCount && !cartella.wins[activePrize] && !cartelleWins[activePrize].won) {
-                            if (prizeDelaysConfig[activePrize].expired) {
-                                cartella.wins[activePrize] = true;
-                                logRegiaEvent(`${activePrize.toUpperCase()} su cartella #${cartella.id}, ma premio SCADUTO (andato a Montepremi Non Vinti).`, 'warn');
-                            } else {
-                                const minTarget = antiWinDifficultyConfig.enabled ? (antiWinDifficultyConfig.forcedMin[activePrize] || 0) : 0;
-                                const maxPrevented = activePrize === 'ambo' ? 4 : activePrize === 'terno' ? 4 : activePrize === 'quaterna' ? 5 : 6;
-                                if (extractedNumbers.length >= minTarget || cartelleWins[activePrize].preventedCount > maxPrevented) {
-                                    const wonNums = extractedInRow.slice(0, requiredCount);
-                                    cartella.wins[activePrize] = true;
-                                    cartella.winningRow = row;
-                                    cartella.winningNumbers = wonNums;
-                                    winningNumbersByCartella[cartella.id] = wonNums;
-                                    cartelleWins[activePrize].won = true;
-                                    cartelleWins[activePrize].cartellaId = cartella.id;
-                                    cartelleWins[activePrize].winningRow = row;
-                                    cartelleWins[activePrize].numbers = wonNums;
-                                    cartelleWins[activePrize].extractionCount = extractedNumbers.length;
-                                    cartelleWins[activePrize].winCount++;
-                                    winningType = activePrize;
-                                    winningCartellaIds.push(cartella.id);
-                                    winningNumbers = wonNums;
-                                    winningRowIndex = row;
-                                    newWins = true;
-                                    gameStats.lastWinTime = Date.now();
-                                    prizeAwarded = true;
-                                    break;
-                                } else {
-                                    cartelleWins[activePrize].preventedCount++;
-                                }
-                            }
-                        }
-                    }
-                    if (prizeAwarded) break;
                 }
+                if (prizeAwarded) break;
+            }
+        }
+
+        // Garanzia finale al 90° numero: se tutte le 90 palline sono uscite e ci sono cartelle attive (tutte 15/15),
+        // la Tombola deve essere sempre assegnata ad ogni gioco.
+        if (extractedNumbers.length >= 90 && !cartelleWins.tombola.won && activeCartelle.length > 0) {
+            if (newWins && winningType && winningType !== 'tombola' && winningCartellaIds.length > 0) {
+                highlightWinningElements(winningType, winningCartellaIds, winningNumbers, winningRowIndex);
+                logRegiaEvent(`Vincita ${winningType.toUpperCase()} (cartella ${winningCartellaIds[0]}) al 90° numero.`, 'info');
+            }
+            const tombolaFallback = activeCartelle.find(c =>
+                !c.wins.tombola && c.numbers.length > 0 && c.extractedNumbers.length >= c.numbers.length
+            ) || activeCartelle[0];
+            const tombolaRes = awardTombolaOnCartella(tombolaFallback);
+            if (tombolaRes) {
+                winningType = tombolaRes.winningType;
+                winningCartellaIds = tombolaRes.winningCartellaIds;
+                winningNumbers = tombolaRes.winningNumbers;
+                winningRowIndex = tombolaRes.winningRowIndex;
+                newWins = true;
             }
         }
 
@@ -2563,8 +2852,8 @@ function startTombolaApp() {
         else updateCartelleExtractedNumbers();
 
         if (extractedNumbers.length >= 90) {
-            setTimeout(showTombolaPopup, 500);
             if (!cartelleWins.tombola.won) {
+                setTimeout(showTombolaPopup, 500);
                 handleGameEndWithoutTombola();
             }
         }
@@ -2581,7 +2870,10 @@ function startTombolaApp() {
         }
     }
 
-    function extractNumber() {
+    async function extractNumber() {
+        if (extractedNumbers.length === 0 && !rolloverRecalledThisGame) {
+            await maybeAutoRecallBankIntoNextGame('extract_single');
+        }
         if (!canStartGame()) return;
 
         if (numeroGold === null && generatedCartelle.length > 0) {
@@ -2627,7 +2919,10 @@ function startTombolaApp() {
         lastNumbers[0].style.transform = 'scale(1.1)';
     }
 
-    function startTimer(fromRemote = false) {
+    async function startTimer(fromRemote = false) {
+        if (!fromRemote && extractedNumbers.length === 0 && !rolloverRecalledThisGame) {
+            await maybeAutoRecallBankIntoNextGame('start_timer');
+        }
         if (!canStartGame()) return;
 
         if (numeroGold === null && generatedCartelle.length > 0) {
@@ -2738,17 +3033,28 @@ function startTombolaApp() {
             prizeStats: { totalPrize: 0, goldPrize: 0, amboPrize: 0, ternoPrize: 0, quaternaPrize: 0, cinquinaPrize: 0, tombolaPrize: 0, currency: "€" }
         };
 
+        if (!fromRemote) {
+            void archiveCurrentGameUnclaimedOnEnd('Reset partita');
+        }
+
         goldWon = false;
         goldExpired = false;
         goldWinningCartella = null;
         numeroGold = null;
         unclaimedGoldTotal = 0;
+        currentGameRolloverArchived = false;
+        rolloverRecalledThisGame = false;
         Object.keys(prizeDelaysConfig).forEach(k => {
             prizeDelaysConfig[k].expired = false;
         });
         antiWinDifficultyConfig.blockedNumbersCount = 0;
         isRunning = false;
         lastExtractionTime = null;
+        const tvBadgeReset = document.getElementById('tvRolloverBadge');
+        if (tvBadgeReset) tvBadgeReset.style.display = 'none';
+        if (!fromRemote && !document.getElementById('regiaAutoSaveCloudToggle')?.checked) {
+            persistCurrentGameUnclaimedToDb();
+        }
         updateUnclaimedPotDisplay();
         updateBoxAGold();
         updateGoldNumberOnBoard();
@@ -2808,7 +3114,7 @@ function startTombolaApp() {
 
         Object.keys(activeColorSheets).forEach(color => {
             activeColorSheets[color].forEach(sheet => {
-                sheet.active = false;
+                sheet.active = effectiveCardMode === 'tavolo';
             });
         });
 
@@ -3082,7 +3388,14 @@ function startTombolaApp() {
             document.getElementById('pauseBtn').disabled = true;
             document.getElementById('extractBtn').disabled = true;
             document.getElementById('cleanBtn').disabled = true;
-            assignUnclaimedPotToTombolaWinner(winningCartellaIds[0]);
+            const autoSaveToggle = document.getElementById('regiaAutoSaveCloudToggle');
+            if (autoSaveToggle && autoSaveToggle.checked) {
+                if (unclaimedGoldTotal > 0) {
+                    void archiveCurrentGameUnclaimedOnEnd(`Fine partita (Tombola ${winningCartellaIds[0]})`);
+                }
+            } else {
+                assignUnclaimedPotToTombolaWinner(winningCartellaIds[0]);
+            }
             showWinPopup(winningType, winningCartellaIds, winningNumbers, true);
             logRegiaEvent(`👑 TOMBOLA VINTA sulla cartella ${winningCartellaIds[0]}! Gioco terminato.`, 'win');
             return;
@@ -3316,6 +3629,19 @@ function startTombolaApp() {
             blockedNumbersCount: antiWinDifficultyConfig.blockedNumbersCount,
             ...(extractedNumbers.length > 0 ? { difficultyIndex: antiWinDifficultyConfig.difficultyIndex } : {}),
         }, { render: true, notifyEngineSync: false });
+
+        const regiaTavoloBanner = document.getElementById('regiaTavoloInfoBanner');
+        const regiaTavoloText = document.getElementById('regiaTavoloInfoText');
+        if (regiaTavoloBanner && regiaTavoloText) {
+            if (effectiveCardMode === 'tavolo' && generatedCartelle.length > 0) {
+                regiaTavoloBanner.style.display = 'flex';
+                const previewLabels = activeTavoloSheets.slice(0, 6).map(n => formatSheetLabel(n)).join(', ');
+                const extra = activeTavoloSheets.length > 6 ? ` (+${activeTavoloSheets.length - 6})` : '';
+                regiaTavoloText.textContent = `Sezione Tavolo: ${selectedTavoloGameId} • Fogli in gioco (${activeTavoloSheets.length}/${tavoloTotalSheets}): ${previewLabels || 'Nessuno'}${extra}`;
+            } else {
+                regiaTavoloBanner.style.display = 'none';
+            }
+        }
 
         // Mini board
         syncRegiaBoardCells();
@@ -3585,6 +3911,422 @@ function startTombolaApp() {
         syncRegiaUI();
         initTvGraphicsManager();
         initCloudJackpotManager();
+        void initTavoloCardsSection();
+    }
+
+    // ===== FUNZIONI SEZIONE TAVOLO GIOCO (30 FOGLI PERMANENTI & SELEZIONE IN GIOCO) =====
+    function updateTavoloSheetVisualStates() {
+        const isTavolo = effectiveCardMode === 'tavolo';
+        document.querySelectorAll('.foglio-a4').forEach(foglioEl => {
+            const sheetNum = parseInt(foglioEl.dataset.sheetNumber || '0', 10);
+            if (!sheetNum) return;
+            const inGame = !isTavolo || activeTavoloSheets.includes(sheetNum);
+            foglioEl.classList.toggle('sheet-excluded', isTavolo && !inGame);
+            foglioEl.classList.toggle('sheet-hidden-by-filter', isTavolo && showOnlySelectedTavoloSheets && !inGame);
+        });
+    }
+
+    function updateTavoloSelectorSummary() {
+        const summaryEl = document.getElementById('tavoloActiveSummary');
+        const labelEl = document.getElementById('tavoloActiveGameLabel');
+        if (labelEl) labelEl.textContent = selectedTavoloGameId;
+        if (summaryEl) {
+            const activeCardsCount = generatedCartelle.filter(c => isCartellaActive(c.id)).length;
+            summaryEl.textContent = `In gioco: ${activeTavoloSheets.length} / ${tavoloTotalSheets} fogli • ${activeCardsCount} cartelle controllate`;
+        }
+        const menuStatus = document.getElementById('menuTavoloSavedStatus');
+        const foundMeta = savedTavoloSetsMeta.find(s => s.id === selectedTavoloGameId) || savedTavoloSetsMeta[0];
+        if (menuStatus) {
+            if (foundMeta) {
+                menuStatus.textContent = `Salvato in DB: ${foundMeta.id} (${foundMeta.totalSheets} fogli • ${foundMeta.activeSheets.length} in gioco)`;
+            } else {
+                menuStatus.textContent = 'Pronto per generare e salvare 30 fogli permanenti';
+            }
+        }
+        const savedNoteEl = document.getElementById('tavoloLastSavedNote');
+        const savedTextEl = document.getElementById('tavoloLastSavedText');
+        if (savedNoteEl && savedTextEl) {
+            const targetTimestamp =
+                (currentLoadedTavoloSet && currentLoadedTavoloSet.gameId === selectedTavoloGameId && currentLoadedTavoloSet.updatedAt) ||
+                (foundMeta && foundMeta.id === selectedTavoloGameId && foundMeta.updatedAt) ||
+                null;
+            if (targetTimestamp) {
+                const formatted = formatItalianDateTime(targetTimestamp);
+                const dbTag = lastTavoloSaveSourceLabel ? ` (${lastTavoloSaveSourceLabel})` : '';
+                savedNoteEl.classList.remove('unsaved');
+                savedTextEl.textContent = `Salvato in DB${dbTag}: ${formatted}`;
+            } else {
+                savedNoteEl.classList.add('unsaved');
+                savedTextEl.textContent = `Nessun salvataggio DB per ${selectedTavoloGameId}`;
+            }
+        }
+    }
+
+    function renderTavoloSheetsSelectorGrid() {
+        const grid = document.getElementById('tavoloSheetsGrid');
+        if (!grid) return;
+        grid.innerHTML = '';
+
+        for (let s = 1; s <= tavoloTotalSheets; s++) {
+            const label = formatSheetLabel(s);
+            const isActive = activeTavoloSheets.includes(s);
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = `tavolo-sheet-chip ${isActive ? 'active' : ''}`;
+            btn.dataset.sheet = String(s);
+            btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+            btn.innerHTML = `<i class="fas ${isActive ? 'fa-check-square' : 'fa-square'}"></i> <span>Foglio ${label}</span>`;
+            btn.addEventListener('click', () => {
+                toggleTavoloSheetActive(s);
+            });
+            grid.appendChild(btn);
+        }
+
+        const filterToggle = document.getElementById('tavoloOnlySelectedToggle');
+        if (filterToggle) filterToggle.checked = showOnlySelectedTavoloSheets;
+
+        updateTavoloSelectorSummary();
+    }
+
+    async function setTavoloActiveSheets(nextSheets, persist = true) {
+        activeTavoloSheets = sanitizeActiveSheetsList(nextSheets, tavoloTotalSheets);
+
+        if (effectiveCardMode === 'tavolo' && generatedCartelle.length > 0 && extractedNumbers.length > 0) {
+            generatedCartelle.forEach(c => {
+                if (isCartellaActive(c.id)) {
+                    c.extractedNumbers = c.numbers
+                        .map(n => n.number)
+                        .filter(num => extractedNumbers.includes(num));
+                } else {
+                    c.extractedNumbers = [];
+                }
+            });
+        }
+
+        renderTavoloSheetsSelectorGrid();
+        updateTavoloSheetVisualStates();
+        updateCartelleExtractedNumbers();
+        updateCartelleStats();
+        updateWinsDisplay();
+        updateGameStats();
+        if (aiIntelligenceEnabled) analyzeAllCartelleAdvanced();
+        syncRegiaUI();
+
+        if (persist && currentLoadedTavoloSet) {
+            const nowIso = new Date().toISOString();
+            currentLoadedTavoloSet.activeSheets = [...activeTavoloSheets];
+            currentLoadedTavoloSet.updatedAt = nowIso;
+            await saveTavoloActiveSheetsSelection(selectedTavoloGameId, activeTavoloSheets);
+            const idx = savedTavoloSetsMeta.findIndex(m => m.id === selectedTavoloGameId);
+            if (idx >= 0) {
+                savedTavoloSetsMeta[idx].activeSheets = [...activeTavoloSheets];
+                savedTavoloSetsMeta[idx].updatedAt = nowIso;
+            }
+            updateTavoloSelectorSummary();
+        }
+    }
+
+    function toggleTavoloSheetActive(sheetNumber) {
+        const exists = activeTavoloSheets.includes(sheetNumber);
+        const next = exists
+            ? activeTavoloSheets.filter(n => n !== sheetNumber)
+            : [...activeTavoloSheets, sheetNumber];
+        void setTavoloActiveSheets(next, true);
+    }
+
+    async function refreshTavoloSetsSelect() {
+        const selectEl = document.getElementById('tavoloSetSelect');
+        savedTavoloSetsMeta = await listSavedTavoloSets();
+
+        if (selectEl) {
+            const hasDefault = savedTavoloSetsMeta.some(s => s.id === DEFAULT_TAVOLO_GAME_ID);
+            const items = hasDefault
+                ? savedTavoloSetsMeta
+                : [
+                    {
+                        id: DEFAULT_TAVOLO_GAME_ID,
+                        gameId: DEFAULT_TAVOLO_GAME_ID,
+                        name: `Sezione Tavolo Gioco ${DEFAULT_TAVOLO_GAME_ID} (30 Fogli)`,
+                        totalSheets: DEFAULT_TAVOLO_SHEETS_COUNT,
+                        activeSheets: [],
+                    },
+                    ...savedTavoloSetsMeta,
+                ];
+            selectEl.innerHTML = '';
+            items.forEach(meta => {
+                const opt = document.createElement('option');
+                opt.value = meta.id;
+                const savedMark = savedTavoloSetsMeta.some(s => s.id === meta.id) ? '✓ Salvato' : 'Da generare';
+                opt.textContent = `${meta.id} (${meta.totalSheets} Fogli • ${savedMark})`;
+                selectEl.appendChild(opt);
+            });
+            selectEl.value = selectedTavoloGameId;
+        }
+        updateTavoloSelectorSummary();
+    }
+
+    function applyLoadedTavoloSetToRuntime(set, sourceLabel = 'DB') {
+        currentLoadedTavoloSet = set;
+        lastTavoloSaveSourceLabel = sourceLabel;
+        selectedTavoloGameId = set.gameId;
+        tavoloTotalSheets = set.totalSheets || DEFAULT_TAVOLO_SHEETS_COUNT;
+        activeTavoloSheets = sanitizeActiveSheetsList(set.activeSheets, tavoloTotalSheets);
+        cartelleGameId = set.gameId;
+        effectiveCardMode = 'tavolo';
+
+        const tavoloGameInput = document.getElementById('tavoloGameIdInput');
+        const tavoloSheetsInput = document.getElementById('tavoloNumSheetsInput');
+        const selectEl = document.getElementById('tavoloSetSelect');
+        if (tavoloGameInput) tavoloGameInput.value = set.gameId;
+        if (tavoloSheetsInput) tavoloSheetsInput.value = String(tavoloTotalSheets);
+        if (selectEl) selectEl.value = set.gameId;
+
+        generatedCartelle = hydrateRuntimeCartelleFromTavoloSet(set);
+        winningNumbersByCartella = {};
+        generatedCartelle.forEach(c => {
+            winningNumbersByCartella[c.id] = [];
+            if (extractedNumbers.length > 0 && isCardActiveForMode({
+                card: c,
+                mode: 'tavolo',
+                selectedTavoloGameId,
+                activeTavoloSheets,
+                participatingGiocatori,
+                isColorActive: () => true,
+            })) {
+                c.extractedNumbers = c.numbers
+                    .map(n => n.number)
+                    .filter(num => extractedNumbers.includes(num));
+            }
+        });
+
+        updateColorSheetsFromCartelle(true);
+        renderTavoloSheetsSelectorGrid();
+        renderCartelle();
+        updateWinsDisplay();
+        updateGameStats();
+        if (aiIntelligenceEnabled) analyzeAllCartelleAdvanced();
+        if (generatedCartelle.length > 0 && numeroGold === null) {
+            getGoldNumberForExtraction();
+        }
+
+        const badge = document.getElementById('tavoloDbStatusBadge');
+        if (badge) {
+            badge.classList.add('saved');
+            badge.innerHTML = `<i class="fas fa-check-circle"></i> Caricato Permanente (${sourceLabel.toUpperCase()})`;
+        }
+        syncRegiaUI();
+    }
+
+    async function loadTavoloSetIntoApp(setId = selectedTavoloGameId, options = {}) {
+        const { silent = false } = options;
+        const cleanId = sanitizeTavoloGameId(setId);
+        const res = await loadPermanentTavoloSet(cleanId);
+
+        if (!res.set) {
+            lastTavoloSaveSourceLabel = '';
+            updateTavoloSelectorSummary();
+            const badge = document.getElementById('tavoloDbStatusBadge');
+            if (badge) {
+                badge.classList.remove('saved');
+                badge.innerHTML = `<i class="fas fa-info-circle"></i> ${cleanId} non ancora salvato`;
+            }
+            if (!silent) {
+                showErrorPopup(`Nessuna sezione permanente salvata per ${cleanId}. Clicca su "Genera & Salva 30 Fogli Permanenti".`);
+            }
+            return false;
+        }
+
+        const verifiedLabel =
+            res.savedToFirestore && res.savedToServerDb
+                ? 'Firestore + Server'
+                : res.savedToFirestore
+                    ? 'Firestore'
+                    : res.savedToServerDb
+                        ? 'Server DB'
+                        : 'Cache Locale';
+
+        applyLoadedTavoloSetToRuntime(res.set, verifiedLabel);
+        await refreshTavoloSetsSelect();
+        if (!silent) {
+            showSuccessPopup(`Richiamati ${res.set.totalSheets} fogli permanenti (${res.set.gameId}, ${generatedCartelle.length} cartelle) da ${verifiedLabel}!`);
+        }
+        return true;
+    }
+
+    async function executeGenerateAndSaveTavoloSet(targetGameId, targetTotalSheets) {
+        const genBtn = document.getElementById('generateTavoloSetBtn');
+        const badge = document.getElementById('tavoloDbStatusBadge');
+        if (genBtn) genBtn.disabled = true;
+        if (badge) {
+            badge.classList.remove('saved');
+            badge.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Generazione e salvataggio...`;
+        }
+
+        try {
+            const newSet = generatePermanentTavoloSet(targetGameId, targetTotalSheets);
+            const saveResult = await savePermanentTavoloSet(newSet);
+            writeTavoloUiPrefs({ mode: 'tavolo', selectedGameId: newSet.gameId });
+            const verifiedLabel =
+                saveResult.savedToFirestore && saveResult.savedToServerDb
+                    ? 'Firestore + Server'
+                    : saveResult.savedToFirestore
+                        ? 'Firestore'
+                        : saveResult.savedToServerDb
+                            ? 'Server DB'
+                            : 'Cache Locale';
+            applyLoadedTavoloSetToRuntime(saveResult.set, verifiedLabel);
+            await refreshTavoloSetsSelect();
+
+            logRegiaEvent(
+                `Generata e salvata sezione permanente Tavolo ${newSet.gameId}: ${newSet.totalSheets} fogli (Foglio 01-${formatSheetLabel(newSet.totalSheets)}).`,
+                'info'
+            );
+            showSuccessPopup(
+                `Sezione Tavolo ${newSet.gameId} salvata permanentemente! (${newSet.totalSheets} Fogli • ${generatedCartelle.length} Cartelle)`
+            );
+        } catch (err) {
+            console.error('[Tavolo] Errore generazione set permanente:', err);
+            showErrorPopup(`Errore durante generazione/salvataggio: ${err?.message || err}`);
+        } finally {
+            if (genBtn) genBtn.disabled = false;
+        }
+    }
+
+    function requestGeneratePermanentTavoloSet() {
+        const rawGameId = document.getElementById('tavoloGameIdInput')?.value || DEFAULT_TAVOLO_GAME_ID;
+        const targetGameId = sanitizeTavoloGameId(rawGameId);
+        const totalSheets = Math.max(
+            1,
+            Math.min(100, parseInt(document.getElementById('tavoloNumSheetsInput')?.value || '30', 10) || 30)
+        );
+        const alreadyExists = savedTavoloSetsMeta.some(m => m.id === targetGameId);
+
+        if (alreadyExists) {
+            showConfirmDialog(
+                'Sovrascrivere Cartelle Permanenti?',
+                `La sezione <b>${targetGameId}</b> è già salvata nel database.<br>Vuoi davvero rigenerare nuovi numeri per i ${totalSheets} fogli? (Se vuoi solo ristampare usa <b>Richiama da Database</b>).`,
+                () => {
+                    void executeGenerateAndSaveTavoloSet(targetGameId, totalSheets);
+                }
+            );
+            return;
+        }
+        void executeGenerateAndSaveTavoloSet(targetGameId, totalSheets);
+    }
+
+    function cloneColorSheetsMap(source) {
+        return {
+            blue: (source?.blue || []).map(s => ({ ...s })),
+            orange: (source?.orange || []).map(s => ({ ...s })),
+            green: (source?.green || []).map(s => ({ ...s })),
+            yellow: (source?.yellow || []).map(s => ({ ...s })),
+        };
+    }
+
+    function snapshotOnlineWorkspace() {
+        const gameIdInput = document.getElementById('gameId');
+        const numGiocatoriInput = document.getElementById('numGiocatori');
+        const startSheetInput = document.getElementById('startSheet');
+        const cleanOnlineId = (gameIdInput?.value || '').trim();
+        onlineWorkspace = {
+            gameId: cleanOnlineId && cleanOnlineId !== selectedTavoloGameId ? cleanOnlineId : (onlineWorkspace.gameId || DEFAULT_ONLINE_GAME_ID),
+            cartelle: [...generatedCartelle],
+            winningNumbersByCartella: { ...winningNumbersByCartella },
+            activeColorSheets: cloneColorSheetsMap(activeColorSheets),
+            participatingGiocatori,
+            numGiocatori: numGiocatoriInput?.value || '1',
+            startSheet: startSheetInput?.value || '1',
+        };
+    }
+
+    function restoreOnlineWorkspace() {
+        const gameIdInput = document.getElementById('gameId');
+        const numGiocatoriInput = document.getElementById('numGiocatori');
+        const startSheetInput = document.getElementById('startSheet');
+        const partInput = document.getElementById('participatingGiocatori');
+
+        cartelleGameId = onlineWorkspace.gameId || DEFAULT_ONLINE_GAME_ID;
+        generatedCartelle = [...(onlineWorkspace.cartelle || [])];
+        winningNumbersByCartella = { ...(onlineWorkspace.winningNumbersByCartella || {}) };
+        activeColorSheets = cloneColorSheetsMap(onlineWorkspace.activeColorSheets);
+        participatingGiocatori = onlineWorkspace.participatingGiocatori || 0;
+
+        if (gameIdInput) gameIdInput.value = cartelleGameId;
+        if (numGiocatoriInput) numGiocatoriInput.value = onlineWorkspace.numGiocatori || '1';
+        if (startSheetInput) startSheetInput.value = onlineWorkspace.startSheet || '1';
+        if (partInput) partInput.value = String(participatingGiocatori);
+
+        if (generatedCartelle.length > 0 && extractedNumbers.length > 0) {
+            generatedCartelle.forEach(c => {
+                c.extractedNumbers = c.numbers
+                    .map(n => n.number)
+                    .filter(num => extractedNumbers.includes(num));
+            });
+        }
+        initColorControls();
+    }
+
+    async function setCartellePlayMode(mode) {
+        const prevEffectiveMode = effectiveCardMode;
+        cartellePlayMode = mode;
+        const menuEl = document.getElementById('cartelleModeMenu');
+        const tavoloEl = document.getElementById('tavoloModeControls');
+        const onlineEl = document.getElementById('onlineModeControls');
+        const genOnlineBtn = document.getElementById('generateCartelle');
+
+        document.querySelectorAll('.mode-tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.mode === mode);
+        });
+
+        if (menuEl) menuEl.style.display = mode === 'menu' ? 'block' : 'none';
+        if (tavoloEl) tavoloEl.style.display = mode === 'tavolo' ? 'flex' : 'none';
+        if (onlineEl) onlineEl.style.display = mode === 'online' ? 'flex' : 'none';
+        if (genOnlineBtn) genOnlineBtn.style.display = mode === 'online' ? 'inline-flex' : 'none';
+
+        if (mode === 'tavolo') {
+            if (prevEffectiveMode === 'online') {
+                snapshotOnlineWorkspace();
+            }
+            effectiveCardMode = 'tavolo';
+            writeTavoloUiPrefs({ mode: 'tavolo', selectedGameId: selectedTavoloGameId });
+            await refreshTavoloSetsSelect();
+            if (!currentLoadedTavoloSet || currentLoadedTavoloSet.gameId !== selectedTavoloGameId) {
+                await loadTavoloSetIntoApp(selectedTavoloGameId, { silent: true });
+            } else {
+                applyLoadedTavoloSetToRuntime(currentLoadedTavoloSet, 'DB');
+            }
+        } else if (mode === 'online') {
+            effectiveCardMode = 'online';
+            writeTavoloUiPrefs({ mode: 'online' });
+            restoreOnlineWorkspace();
+            renderCartelle();
+            updateCartelleStats();
+            updateWinsDisplay();
+            updateGameStats();
+            if (aiIntelligenceEnabled) analyzeAllCartelleAdvanced();
+        }
+        syncRegiaUI();
+    }
+
+    async function initTavoloCardsSection() {
+        const prefs = readTavoloUiPrefs();
+        selectedTavoloGameId = prefs.selectedGameId || DEFAULT_TAVOLO_GAME_ID;
+        showOnlySelectedTavoloSheets = Boolean(prefs.showOnlySelectedSheets);
+
+        await refreshTavoloSetsSelect();
+        renderTavoloSheetsSelectorGrid();
+
+        if (prefs.mode === 'tavolo') {
+            await loadTavoloSetIntoApp(selectedTavoloGameId, { silent: true });
+        }
+
+        // Default initial screen in Cartelle is the initial menu unless explicitly opened via ?autostart=1
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('autostart') === '1' && prefs.mode === 'tavolo') {
+            await setCartellePlayMode('tavolo');
+        } else {
+            await setCartellePlayMode('menu');
+        }
     }
 
     function setupEventListeners() {
@@ -3868,8 +4610,8 @@ function startTombolaApp() {
             showCartelleSection();
         });
 
-        document.getElementById('regiaStartBtn').addEventListener('click', function() {
-            startTimer();
+        document.getElementById('regiaStartBtn').addEventListener('click', async function() {
+            await startTimer();
             logRegiaEvent('Avviata estrazione automatica da Regia.', 'info');
             syncRegiaUI();
         });
@@ -3880,8 +4622,8 @@ function startTombolaApp() {
             syncRegiaUI();
         });
 
-        document.getElementById('regiaExtractBtn').addEventListener('click', function() {
-            extractNumber();
+        document.getElementById('regiaExtractBtn').addEventListener('click', async function() {
+            await extractNumber();
             syncRegiaUI();
         });
 
@@ -3940,7 +4682,7 @@ function startTombolaApp() {
             }
         });
 
-        document.getElementById('regiaApplyPrizeBtn').addEventListener('click', function() {
+        document.getElementById('regiaApplyPrizeBtn').addEventListener('click', async function() {
             const val = parseFloat(document.getElementById('regiaPrizePoolInput').value) || 0;
             const curr = document.getElementById('regiaCurrencySelect').value;
             document.getElementById('prizePool').value = val;
@@ -3948,6 +4690,9 @@ function startTombolaApp() {
             updatePrizes();
             logRegiaEvent(`Montepremi aggiornato a ${curr} ${val.toFixed(2)}.`, 'info');
             syncRegiaUI();
+            if (val > 0 && extractedNumbers.length === 0) {
+                await maybeAutoRecallBankIntoNextGame('apply_prize');
+            }
             void regiaStateManager.syncRegiaCardsWithFirestore({ immediate: true, source: 'regia_prizes' });
         });
 
@@ -3966,7 +4711,9 @@ function startTombolaApp() {
                     : "Are you sure you want to reset the current game's unclaimed prizes?",
                 function() {
                     unclaimedGoldTotal = 0;
+                    currentGameRolloverArchived = false;
                     updateUnclaimedPotDisplay();
+                    persistCurrentGameUnclaimedToDb();
                     logRegiaEvent('Premi non vinti della partita attuale azzerati.', 'warn');
                     syncRegiaUI();
                     showSuccessPopup(currentLanguage === 'it' ? "Non Vinti partita azzerati!" : "Current unclaimed pot reset!");
@@ -4104,7 +4851,7 @@ function startTombolaApp() {
         const resetCloudBtn = document.getElementById('regiaResetCloudBtn');
         if (resetCloudBtn) {
             resetCloudBtn.addEventListener('click', function() {
-                const gameId = document.getElementById('gameId')?.value || 'TOM001';
+                const gameId = cartelleGameId || document.getElementById('gameId')?.value || DEFAULT_ONLINE_GAME_ID;
 
                 showConfirmDialog(
                     currentLanguage === 'it' ? "Azzera Database Cassa Cloud" : "Reset Cloud Database",
@@ -4148,6 +4895,190 @@ function startTombolaApp() {
                 }
             });
         }
+
+        // 5. Preferenze Auto-accumulo & Auto-richiamo Rollover
+        const autoSaveToggleEl = document.getElementById('regiaAutoSaveCloudToggle');
+        if (autoSaveToggleEl) {
+            const storedAutoSave = localStorage.getItem('tombola_auto_save_cloud_v1');
+            if (storedAutoSave !== null) autoSaveToggleEl.checked = storedAutoSave === 'true';
+            autoSaveToggleEl.addEventListener('change', function() {
+                localStorage.setItem('tombola_auto_save_cloud_v1', String(this.checked));
+                logRegiaEvent(`Auto-accumulo a fine partita: ${this.checked ? 'ATTIVATO' : 'DISATTIVATO'}.`, 'info');
+            });
+        }
+
+        const autoRecallToggleEl = document.getElementById('regiaAutoRecallCloudToggle');
+        if (autoRecallToggleEl) {
+            const storedAutoRecall = localStorage.getItem('tombola_auto_recall_cloud_v1');
+            if (storedAutoRecall !== null) autoRecallToggleEl.checked = storedAutoRecall === 'true';
+            autoRecallToggleEl.addEventListener('change', function() {
+                localStorage.setItem('tombola_auto_recall_cloud_v1', String(this.checked));
+                logRegiaEvent(`Auto-richiamo Totale nella partita successiva: ${this.checked ? 'ATTIVATO' : 'DISATTIVATO'}.`, 'info');
+            });
+        }
+
+        // 6. Modale Configurazione Dual-Database (Firebase + Appwrite Cloud)
+        const dualDbModal = document.getElementById('dualDbModal');
+        const dualDbFbState = document.getElementById('dualDbFbState');
+        const dualDbSrvState = document.getElementById('dualDbSrvState');
+        const dualDbAwState = document.getElementById('dualDbAwState');
+        const dualDbAwSub = document.getElementById('dualDbAwSub');
+        const dualDbModeSelect = document.getElementById('dualDbModeSelect');
+        const dualDbFeedback = document.getElementById('dualDbTestFeedback');
+
+        const refreshDualDbModalUI = () => {
+            const snap = regiaStateManager.getState().cloudBank;
+            const aw = getAppwriteStatus();
+            const cfg = loadStoredAppwriteConfig();
+
+            if (dualDbModeSelect) dualDbModeSelect.value = resolveDatabaseMode();
+            if (dualDbFbState) {
+                dualDbFbState.className = `provider-state-badge ${snap.firebaseConnected ? 'online' : 'offline'}`;
+                dualDbFbState.textContent = snap.firebaseConnected ? 'Connesso' : 'Offline / Bloccato';
+            }
+            if (dualDbSrvState) {
+                dualDbSrvState.className = `provider-state-badge ${snap.serverConnected ? 'online' : 'offline'}`;
+                dualDbSrvState.textContent = snap.serverConnected ? 'Attivo' : 'Hosting Statico';
+            }
+            if (dualDbAwState) {
+                const stateCls = aw.connected ? 'online' : aw.configured ? 'offline' : 'unconfigured';
+                dualDbAwState.className = `provider-state-badge ${stateCls}`;
+                dualDbAwState.textContent = aw.connected ? 'Connesso' : aw.configured ? 'Errore' : 'Opzionale';
+            }
+            if (dualDbAwSub) {
+                dualDbAwSub.textContent = aw.lastError
+                    ? aw.lastError
+                    : aw.configured
+                        ? `Project: ${cfg.projectId} • DB: ${cfg.databaseId}`
+                        : 'Non obbligatorio (l\'app funziona già al 100%)';
+            }
+
+            const setVal = (id, v) => {
+                const el = document.getElementById(id);
+                if (el && document.activeElement !== el) el.value = v || '';
+            };
+            setVal('awEndpointInput', cfg.endpoint);
+            setVal('awProjectIdInput', cfg.projectId);
+            setVal('awDatabaseIdInput', cfg.databaseId);
+            setVal('awBankCollInput', cfg.bankCollectionId);
+            setVal('awHistoryCollInput', cfg.historyCollectionId);
+            setVal('awConfigCollInput', cfg.configCollectionId);
+            const anonChk = document.getElementById('awAnonSessionCheck');
+            if (anonChk) anonChk.checked = Boolean(cfg.useAnonymousSession);
+        };
+
+        const openDualDbModal = () => {
+            if (!dualDbModal) return;
+            if (dualDbFeedback) {
+                dualDbFeedback.style.display = 'none';
+                dualDbFeedback.textContent = '';
+            }
+            refreshDualDbModalUI();
+            dualDbModal.style.display = 'flex';
+        };
+
+        const closeDualDbModal = () => {
+            if (dualDbModal) dualDbModal.style.display = 'none';
+        };
+
+        document.getElementById('regiaDbConfigBtn')?.addEventListener('click', openDualDbModal);
+        document.getElementById('regiaAwStatusPill')?.addEventListener('click', openDualDbModal);
+        document.getElementById('regiaServerDbStatusPill')?.addEventListener('click', openDualDbModal);
+        document.getElementById('regiaFbStatusPill')?.addEventListener('click', openDualDbModal);
+        document.getElementById('closeDualDbHeaderBtn')?.addEventListener('click', closeDualDbModal);
+        document.getElementById('closeDualDbFooterBtn')?.addEventListener('click', closeDualDbModal);
+        dualDbModal?.addEventListener('click', function(e) {
+            if (e.target === this) closeDualDbModal();
+        });
+
+        dualDbModeSelect?.addEventListener('change', async function() {
+            const newMode = this.value;
+            const status = await regiaStateManager.setDatabaseMode(newMode);
+            refreshDualDbModalUI();
+            if (dualDbFeedback) {
+                dualDbFeedback.style.display = 'block';
+                dualDbFeedback.className = `dual-db-feedback ${status.anyCloudConnected ? 'success' : 'info'}`;
+                dualDbFeedback.textContent = status.anyCloudConnected
+                    ? `Modalità aggiornata: ${status.statusLabel}.`
+                    : `Modalità impostata su ${newMode.toUpperCase()}. Attualmente in Cache Locale finché un provider non è connesso.`;
+            }
+        });
+
+        const saveAwBtn = document.getElementById('saveAppwriteConfigBtn');
+        if (saveAwBtn) {
+            saveAwBtn.addEventListener('click', async function() {
+                const endpoint = document.getElementById('awEndpointInput')?.value?.trim() || '';
+                const projectId = document.getElementById('awProjectIdInput')?.value?.trim() || '';
+                const databaseId = document.getElementById('awDatabaseIdInput')?.value?.trim() || '';
+                const bankCollectionId = document.getElementById('awBankCollInput')?.value?.trim() || 'jackpot_bank';
+                const historyCollectionId = document.getElementById('awHistoryCollInput')?.value?.trim() || 'unclaimed_history';
+                const configCollectionId = document.getElementById('awConfigCollInput')?.value?.trim() || 'regia_config';
+                const useAnonymousSession = Boolean(document.getElementById('awAnonSessionCheck')?.checked);
+
+                if (!endpoint || !projectId || !databaseId || !bankCollectionId) {
+                    if (dualDbFeedback) {
+                        dualDbFeedback.style.display = 'block';
+                        dualDbFeedback.className = 'dual-db-feedback error';
+                        dualDbFeedback.textContent = 'Compila Endpoint, Project ID, Database ID e Collection ID Cassa prima di salvare.';
+                    }
+                    return;
+                }
+
+                saveAwBtn.disabled = true;
+                saveAwBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Connessione...';
+                try {
+                    const status = await regiaStateManager.configureAppwriteAndReconnect({
+                        endpoint,
+                        projectId,
+                        databaseId,
+                        bankCollectionId,
+                        historyCollectionId,
+                        configCollectionId,
+                        useAnonymousSession,
+                    });
+                    refreshDualDbModalUI();
+                    if (dualDbFeedback) {
+                        dualDbFeedback.style.display = 'block';
+                        dualDbFeedback.className = `dual-db-feedback ${status.appwriteConnected ? 'success' : 'error'}`;
+                        dualDbFeedback.textContent = status.appwriteConnected
+                            ? `Appwrite Cloud connesso e sincronizzato! (${status.statusLabel})`
+                            : (status.appwriteError || 'Impossibile connettersi ad Appwrite. Verifica gli ID e i permessi delle collection.');
+                    }
+                } finally {
+                    saveAwBtn.disabled = false;
+                    saveAwBtn.innerHTML = '<i class="fas fa-check-circle"></i> Salva &amp; Connetti Appwrite';
+                }
+            });
+        }
+
+        document.getElementById('prefillAppwritePresetBtn')?.addEventListener('click', function() {
+            const fill = (id, val) => {
+                const el = document.getElementById(id);
+                if (el) el.value = val;
+            };
+            fill('awEndpointInput', 'https://fra.cloud.appwrite.io/v1');
+            fill('awProjectIdInput', '6af8bbbf003dea6b4e91');
+            fill('awDatabaseIdInput', 'tombola_db');
+            fill('awBankCollInput', 'jackpot_bank');
+            fill('awHistoryCollInput', 'unclaimed_history');
+            fill('awConfigCollInput', 'regia_config');
+            if (dualDbFeedback) {
+                dualDbFeedback.style.display = 'block';
+                dualDbFeedback.className = 'dual-db-feedback info';
+                dualDbFeedback.textContent = 'Parametri del progetto 6af8bbbf003dea6b4e91 inseriti! Dopo aver creato "tombola_db" e le 3 tabelle (vedi Guida PDF), clicca "Salva & Connetti Appwrite".';
+            }
+        });
+
+        document.getElementById('clearAppwriteConfigBtn')?.addEventListener('click', async function() {
+            const cleared = clearStoredAppwriteConfig();
+            await regiaStateManager.configureAppwriteAndReconnect(cleared);
+            refreshDualDbModalUI();
+            if (dualDbFeedback) {
+                dualDbFeedback.style.display = 'block';
+                dualDbFeedback.className = 'dual-db-feedback success';
+                dualDbFeedback.textContent = 'Configurazione Appwrite locale rimossa.';
+            }
+        });
 
         // Event listeners per Box Unificato: Controllo Difficoltà, Soglie & Profili DB
         const readAllEngineInputsIntoConfig = () => {
@@ -4278,7 +5209,7 @@ function startTombolaApp() {
                     enabled: true,
                     level: 'high',
                     forcedMin: { ambo: 15, terno: 28, quaterna: 42, cinquina: 58, tombola: 75 },
-                    delayMax: { gold: 25, ambo: 20, terno: 35, quaterna: 50, cinquina: 65, tombola: 85 }
+                    delayMax: { gold: 25, ambo: 20, terno: 35, quaterna: 50, cinquina: 65, tombola: 90 }
                 };
                 antiWinDifficultyConfig.enabled = defaultHigh.enabled;
                 antiWinDifficultyConfig.level = defaultHigh.level;
@@ -4392,6 +5323,63 @@ function startTombolaApp() {
 
         document.getElementById('regiaClearLogBtn').addEventListener('click', function() {
             regiaStateManager.clearLogs();
+        });
+
+        // Cartelle Mode Menu & Sezione Tavolo Gioco Controls
+        document.getElementById('chooseModeTavoloBtn')?.addEventListener('click', () => {
+            void setCartellePlayMode('tavolo');
+        });
+        document.getElementById('chooseModeOnlineBtn')?.addEventListener('click', () => {
+            void setCartellePlayMode('online');
+        });
+        document.getElementById('modeMenuTabBtn')?.addEventListener('click', () => {
+            void setCartellePlayMode('menu');
+        });
+        document.getElementById('modeTavoloTabBtn')?.addEventListener('click', () => {
+            void setCartellePlayMode('tavolo');
+        });
+        document.getElementById('modeOnlineTabBtn')?.addEventListener('click', () => {
+            void setCartellePlayMode('online');
+        });
+
+        document.getElementById('generateTavoloSetBtn')?.addEventListener('click', requestGeneratePermanentTavoloSet);
+        document.getElementById('loadTavoloSetBtn')?.addEventListener('click', () => {
+            const chosen = document.getElementById('tavoloSetSelect')?.value
+                || document.getElementById('tavoloGameIdInput')?.value
+                || DEFAULT_TAVOLO_GAME_ID;
+            void loadTavoloSetIntoApp(chosen, { silent: false });
+        });
+        document.getElementById('tavoloSetSelect')?.addEventListener('change', function() {
+            selectedTavoloGameId = sanitizeTavoloGameId(this.value);
+            const gInput = document.getElementById('tavoloGameIdInput');
+            if (gInput) gInput.value = selectedTavoloGameId;
+            writeTavoloUiPrefs({ selectedGameId: selectedTavoloGameId });
+            void loadTavoloSetIntoApp(selectedTavoloGameId, { silent: true });
+        });
+
+        document.getElementById('tavoloSelectAllBtn')?.addEventListener('click', () => {
+            const all = Array.from({ length: tavoloTotalSheets }, (_, i) => i + 1);
+            void setTavoloActiveSheets(all, true);
+        });
+        document.getElementById('tavoloSelectNoneBtn')?.addEventListener('click', () => {
+            void setTavoloActiveSheets([], true);
+        });
+        document.getElementById('tavoloSelectFirst5Btn')?.addEventListener('click', () => {
+            const first5 = Array.from({ length: Math.min(5, tavoloTotalSheets) }, (_, i) => i + 1);
+            void setTavoloActiveSheets(first5, true);
+        });
+        document.getElementById('tavoloSelectFirst10Btn')?.addEventListener('click', () => {
+            const first10 = Array.from({ length: Math.min(10, tavoloTotalSheets) }, (_, i) => i + 1);
+            void setTavoloActiveSheets(first10, true);
+        });
+        document.getElementById('tavoloSelectFirst15Btn')?.addEventListener('click', () => {
+            const first15 = Array.from({ length: Math.min(15, tavoloTotalSheets) }, (_, i) => i + 1);
+            void setTavoloActiveSheets(first15, true);
+        });
+        document.getElementById('tavoloOnlySelectedToggle')?.addEventListener('change', function() {
+            showOnlySelectedTavoloSheets = Boolean(this.checked);
+            writeTavoloUiPrefs({ showOnlySelectedSheets: showOnlySelectedTavoloSheets });
+            updateTavoloSheetVisualStates();
         });
 
         // Cartelle Section Controls
@@ -4606,6 +5594,18 @@ function startTombolaApp() {
         getGeneratedCartelle: () => generatedCartelle,
         getActiveColorSheets: () => activeColorSheets,
         getExtractedNumbers: () => extractedNumbers,
+        getUnclaimedGoldTotal: () => unclaimedGoldTotal,
+        getCartellePlayMode: () => cartellePlayMode,
+        getEffectiveCardMode: () => effectiveCardMode,
+        getActiveTavoloSheets: () => [...activeTavoloSheets],
+        getSelectedTavoloGameId: () => selectedTavoloGameId,
+        isCartellaActive,
+        setCartellePlayMode,
+        setTavoloActiveSheets,
+        loadTavoloSetIntoApp,
+        checkPrizeExpirations,
+        archiveCurrentGameUnclaimedOnEnd,
+        maybeAutoRecallBankIntoNextGame,
         extractNumber,
         processExtractedNumber,
         resetGame,
