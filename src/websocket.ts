@@ -49,6 +49,8 @@ export interface InitWebSocketOptions {
   onConnected?: (wsUrl: string) => void;
   onLatency?: (latencyMs: number) => void;
   onClientCount?: (count: number) => void;
+  onConnectionLost?: (info: { reason: string; hadConnectedOnce: boolean; wsUrl: string | null }) => void;
+  disableInternalReconnect?: boolean;
   onRawLog?: (message: string, level: 'info' | 'warn' | 'error') => void;
   WebSocketImpl?: typeof WebSocket | null;
   BroadcastChannelImpl?: typeof BroadcastChannel;
@@ -450,7 +452,15 @@ function connectInternal() {
         transportState.status = 'error';
         activateBroadcastFallback(`${reason} Attivo fallback locale BroadcastChannel.`, activeTargetUrl);
         activeOptions.onStatusChange?.('error', transportState.clientCount, true);
-        scheduleReconnect();
+        if (activeOptions.disableInternalReconnect) {
+          activeOptions.onConnectionLost?.({
+            reason,
+            hadConnectedOnce: false,
+            wsUrl: activeTargetUrl,
+          });
+        } else {
+          scheduleReconnect();
+        }
         return;
       }
 
@@ -570,7 +580,17 @@ function connectInternal() {
           transportState.clientCount,
           useBroadcastFallback
         );
-        scheduleReconnect();
+        if (activeOptions.disableInternalReconnect) {
+          activeOptions.onConnectionLost?.({
+            reason: openedOnce
+              ? `Connessione WebSocket interrotta (${activeTargetUrl}).`
+              : `Connessione WebSocket rifiutata o chiusa da ${activeTargetUrl}.`,
+            hadConnectedOnce: openedOnce,
+            wsUrl: activeTargetUrl,
+          });
+        } else {
+          scheduleReconnect();
+        }
       };
 
       socket.onerror = () => {
@@ -631,7 +651,15 @@ function connectInternal() {
     transportState.status = 'error';
     activateBroadcastFallback(`${reason} Attivo fallback locale BroadcastChannel.`, targetUrl);
     activeOptions.onStatusChange?.('error', transportState.clientCount, true);
-    scheduleReconnect();
+    if (activeOptions.disableInternalReconnect) {
+      activeOptions.onConnectionLost?.({
+        reason,
+        hadConnectedOnce: false,
+        wsUrl: targetUrl,
+      });
+    } else {
+      scheduleReconnect();
+    }
   }
 }
 
@@ -649,6 +677,11 @@ export function initWebSocket(options: InitWebSocketOptions = {}): WebSocketTran
   useStaticHostMode = false;
   hasCompletedHealthProbe = false;
   transportState.staticHostMode = false;
+  stopHeartbeat();
+  clearConnectTimeout();
+  clearReconnectTimer();
+  cleanupActiveSocket();
+  isConnecting = false;
   activeOptions = { ...options };
   connectInternal();
   return getTransportState();

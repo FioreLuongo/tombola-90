@@ -14,9 +14,17 @@ import {
   isBroadcastFallbackActive,
   isRelativeFallbackActive,
   reconnectWebSocket,
+  resolvePrimaryWsEndpoint,
   sendRealtimeMessage,
   setCustomWebSocketUrl,
+  type InitWebSocketOptions,
+  type WebSocketTransportState,
 } from './websocket';
+import {
+  computeExponentialBackoffDelay,
+  normalizeExponentialBackoffConfig,
+  type ExponentialBackoffConfig,
+} from './utils/ws-backoff';
 
 /**
  * ============================================================================
@@ -75,7 +83,243 @@ interface ExtractionPayload {
   source?: string;
 }
 
-class ClientWebSocketManager {
+export type { ExponentialBackoffConfig };
+export { computeExponentialBackoffDelay };
+
+export interface InitializeWebSocketChannelOptions {
+  /** Override opzionale del ruolo client ('regia' | 'tv') */
+  role?: 'regia' | 'tv';
+  /** Override opzionale esplicito dell'endpoint WebSocket */
+  wsUrl?: string | null;
+  /** Override testabile della costante Vite `__APP_WS_URL__` */
+  definedAppWsUrlOverride?: string;
+  /** Configurazione opzionale dell'exponential backoff per la riconnessione */
+  backoff?: ExponentialBackoffConfig;
+  /** Implementazione WebSocket opzionale (es. per test o fallback controllato) */
+  WebSocketImpl?: typeof WebSocket | null;
+  /** Istanza esplicita di ClientWebSocketManager */
+  manager?: ClientWebSocketManager;
+  /** Se true, esegue anche il controllo di raggiungibilità all'avvio */
+  verifyStartup?: boolean;
+}
+
+let activeChannelEpoch = 0;
+let activeBackoffTimer: ReturnType<typeof setTimeout> | null = null;
+let activeCountdownInterval: ReturnType<typeof setInterval> | null = null;
+let activeOnlineListener: (() => void) | null = null;
+let lastChannelOptions: InitializeWebSocketChannelOptions = {};
+
+function clearChannelBackoffTimers() {
+  if (activeBackoffTimer) {
+    clearTimeout(activeBackoffTimer);
+    activeBackoffTimer = null;
+  }
+  if (activeCountdownInterval) {
+    clearInterval(activeCountdownInterval);
+    activeCountdownInterval = null;
+  }
+}
+
+function cleanupChannelSessionListeners() {
+  clearChannelBackoffTimers();
+  if (typeof window !== 'undefined' && activeOnlineListener) {
+    window.removeEventListener('online', activeOnlineListener);
+    activeOnlineListener = null;
+  }
+}
+
+/**
+ * Inizializza il canale di comunicazione WebSocket in tempo reale tra la
+ * Console Regia e lo Schermo TV utilizzando `__APP_WS_URL__` definita in
+ * `vite.config.ts`, con riconnessione automatica ad exponential backoff e
+ * aggiornamento visivo in tempo reale del badge `regiaWsBadge`.
+ */
+export function initializeWebSocketChannel(
+  options: InitializeWebSocketChannelOptions = {}
+): WebSocketTransportState {
+  const sessionEpoch = ++activeChannelEpoch;
+  cleanupChannelSessionListeners();
+  lastChannelOptions = { ...options };
+
+  const targetManager = options.manager ?? clientWsManager;
+  const rawDefinedAppWsUrl =
+    options.definedAppWsUrlOverride !== undefined
+      ? String(options.definedAppWsUrlOverride).trim()
+      : typeof __APP_WS_URL__ !== 'undefined' && __APP_WS_URL__
+        ? String(__APP_WS_URL__).trim()
+        : '';
+
+  const role = options.role ?? targetManager.getClientRole();
+  const primaryEndpoint =
+    options.wsUrl !== undefined ? options.wsUrl : resolvePrimaryWsEndpoint(rawDefinedAppWsUrl);
+  const backoffCfg = normalizeExponentialBackoffConfig(options.backoff);
+
+  let reconnectAttempt = 0;
+
+  const updateBadgeBackoffState = (
+    patch: Partial<{
+      status: ConnectionStatus;
+      reconnecting: boolean;
+      reconnectAttempt: number;
+      reconnectMaxAttempts: number;
+      reconnectDelayMs: number;
+      reconnectRemainingSeconds: number;
+      reconnectExhausted: boolean;
+    }>
+  ) => {
+    regiaStateManager.syncConnectionState({
+      reconnectMaxAttempts: backoffCfg.maxAttempts,
+      ...patch,
+    });
+  };
+
+  const resetBackoffState = () => {
+    clearChannelBackoffTimers();
+    reconnectAttempt = 0;
+    updateBadgeBackoffState({
+      reconnecting: false,
+      reconnectAttempt: 0,
+      reconnectDelayMs: 0,
+      reconnectRemainingSeconds: 0,
+      reconnectExhausted: false,
+    });
+  };
+
+  const scheduleExponentialBackoffReconnect = (reason: string) => {
+    if (sessionEpoch !== activeChannelEpoch) return;
+    if (getTransportState().staticHostMode) return;
+
+    clearChannelBackoffTimers();
+
+    if (reconnectAttempt >= backoffCfg.maxAttempts) {
+      updateBadgeBackoffState({
+        status: 'disconnected',
+        reconnecting: false,
+        reconnectAttempt,
+        reconnectDelayMs: 0,
+        reconnectRemainingSeconds: 0,
+        reconnectExhausted: true,
+      });
+      const exhaustedMsg = `Connessione WebSocket persa definitivamente dopo ${backoffCfg.maxAttempts} tentativi di exponential backoff (${reason}).`;
+      console.error(`[WS-Backoff] ${exhaustedMsg}`);
+      regiaStateManager.addLog(`❌ ${exhaustedMsg}`, 'error');
+      targetManager.notifyServerUnreachable(exhaustedMsg);
+      return;
+    }
+
+    reconnectAttempt += 1;
+    const delayMs = computeExponentialBackoffDelay(reconnectAttempt, backoffCfg);
+    const nextRetryAt = Date.now() + delayMs;
+
+    const refreshBadgeCountdown = () => {
+      if (sessionEpoch !== activeChannelEpoch) return;
+      const remainingMs = Math.max(0, nextRetryAt - Date.now());
+      const remainingSeconds = Math.ceil(remainingMs / 1000);
+      updateBadgeBackoffState({
+        status: 'connecting',
+        reconnecting: true,
+        reconnectAttempt,
+        reconnectDelayMs: delayMs,
+        reconnectRemainingSeconds: remainingSeconds,
+        reconnectExhausted: false,
+      });
+    };
+
+    refreshBadgeCountdown();
+
+    console.warn(
+      `[WS-Backoff] Caduta segnale: tentativo #${reconnectAttempt}/${backoffCfg.maxAttempts} programmato tra ${delayMs}ms (${reason})`
+    );
+    regiaStateManager.addLog(
+      `🔄 Caduta segnale WebSocket: riconnessione #${reconnectAttempt}/${backoffCfg.maxAttempts} tra ${(delayMs / 1000).toFixed(1)}s.`,
+      'warn'
+    );
+
+    if (delayMs >= 450) {
+      activeCountdownInterval = setInterval(() => {
+        if (sessionEpoch !== activeChannelEpoch) {
+          clearChannelBackoffTimers();
+          return;
+        }
+        if (Date.now() >= nextRetryAt) {
+          if (activeCountdownInterval) {
+            clearInterval(activeCountdownInterval);
+            activeCountdownInterval = null;
+          }
+          return;
+        }
+        refreshBadgeCountdown();
+      }, 250);
+    }
+
+    activeBackoffTimer = setTimeout(() => {
+      if (sessionEpoch !== activeChannelEpoch) return;
+      clearChannelBackoffTimers();
+      if (getTransportState().staticHostMode) return;
+
+      updateBadgeBackoffState({
+        status: 'connecting',
+        reconnecting: true,
+        reconnectAttempt,
+        reconnectDelayMs: delayMs,
+        reconnectRemainingSeconds: 0,
+        reconnectExhausted: false,
+      });
+
+      console.info(
+        `[WS-Backoff] Esecuzione tentativo di riconnessione #${reconnectAttempt}/${backoffCfg.maxAttempts}...`
+      );
+      reconnectWebSocket();
+    }, delayMs);
+  };
+
+  if (typeof window !== 'undefined') {
+    activeOnlineListener = () => {
+      if (sessionEpoch !== activeChannelEpoch) return;
+      const currentState = getTransportState();
+      if (currentState.status !== 'connected' && !currentState.staticHostMode) {
+        console.info('[WS-Backoff] Rete tornata online: tentativo immediato di riconnessione WebSocket.');
+        regiaStateManager.addLog('🌐 Rete ripristinata: riavvio connessione WebSocket immediata.', 'info');
+        resetBackoffState();
+        reconnectWebSocket();
+      }
+    };
+    window.addEventListener('online', activeOnlineListener);
+  }
+
+  console.info(
+    `[WS-Channel] Inizializzazione canale Regia <-> TV | ruolo=${role} | __APP_WS_URL__=${rawDefinedAppWsUrl || 'non definito'} | endpoint=${primaryEndpoint || 'BroadcastChannel locale'} | backoff=${backoffCfg.initialDelayMs}ms..${backoffCfg.maxDelayMs}ms (x${backoffCfg.multiplier}, max ${backoffCfg.maxAttempts})`
+  );
+
+  const baseCallbacks = targetManager.buildWebSocketOptions();
+  const state = initWebSocket({
+    ...baseCallbacks,
+    role,
+    definedAppWsUrlOverride: rawDefinedAppWsUrl,
+    ...(options.wsUrl !== undefined ? { wsUrlOverride: options.wsUrl } : {}),
+    ...(options.WebSocketImpl !== undefined ? { WebSocketImpl: options.WebSocketImpl } : {}),
+    disableInternalReconnect: true,
+    onConnected: (wsUrl: string) => {
+      resetBackoffState();
+      baseCallbacks.onConnected?.(wsUrl);
+    },
+    onStaticHostMode: (reason: string) => {
+      resetBackoffState();
+      baseCallbacks.onStaticHostMode?.(reason);
+    },
+    onConnectionLost: ({ reason }) => {
+      scheduleExponentialBackoffReconnect(reason);
+    },
+  });
+
+  if (options.verifyStartup) {
+    targetManager.verifyWebSocketConnectionOnStartup();
+  }
+
+  return state;
+}
+
+export class ClientWebSocketManager {
   private startupCheckTimer: ReturnType<typeof setTimeout> | null = null;
   private startupVerified = false;
   private alertDismissedByUser = false;
@@ -163,27 +407,43 @@ class ClientWebSocketManager {
 
   public setCustomWsUrl(customUrl: string | null) {
     this.alertDismissedByUser = false;
+    cleanupChannelSessionListeners();
     setCustomWebSocketUrl(customUrl);
-    this.verifyWebSocketConnectionOnStartup();
+    initializeWebSocketChannel({ ...lastChannelOptions, manager: this, verifyStartup: true });
   }
 
   public reconnect() {
     this.clearStartupCheckTimer();
     this.startupVerified = false;
-    reconnectWebSocket();
-    this.verifyWebSocketConnectionOnStartup();
+    this.alertDismissedByUser = false;
+    initializeWebSocketChannel({ ...lastChannelOptions, manager: this, verifyStartup: true });
   }
 
   public disconnect() {
+    activeChannelEpoch++;
+    cleanupChannelSessionListeners();
     this.clearStartupCheckTimer();
+    regiaStateManager.syncConnectionState({
+      status: 'disconnected',
+      reconnecting: false,
+      reconnectAttempt: 0,
+      reconnectDelayMs: 0,
+      reconnectRemainingSeconds: 0,
+      reconnectExhausted: false,
+    });
     disconnectWebSocket(false);
   }
 
-  public connect() {
-    if (typeof window === 'undefined') return;
+  public connect(): WebSocketTransportState | undefined {
+    if (typeof window === 'undefined') return undefined;
+    return initializeWebSocketChannel({ manager: this });
+  }
 
-    initWebSocket({
-      role: this.getClientRole(),
+  public buildWebSocketOptions(): Omit<
+    InitWebSocketOptions,
+    'definedAppWsUrlOverride' | 'wsUrlOverride' | 'role'
+  > {
+    return {
       onMessage: (data, origin) => this.handleIncomingData(data, origin),
       onStatusChange: (status: ConnectionStatus, clientCount: number, fallbackActive: boolean) => {
         const transport = getTransportState();
@@ -270,7 +530,7 @@ class ClientWebSocketManager {
         else if (level === 'warn') console.warn(message);
         else console.info(message);
       },
-    });
+    };
   }
 
   public send(msg: RealtimeMessage) {
@@ -332,7 +592,7 @@ class ClientWebSocketManager {
     }
   }
 
-  private notifyServerUnreachable(reason: string) {
+  public notifyServerUnreachable(reason: string) {
     console.warn(`[WS-Startup] ⚠️ ${reason}`);
     regiaStateManager.addLog(`⚠️ ${reason}`, 'warn');
 
@@ -439,11 +699,32 @@ class ClientWebSocketManager {
 
       case 'PRIZE_POOL_UPDATED':
       case 'UPDATE_PRIZES':
+      case 'UPDATE_PRIZE_POOL':
         if (!handledByController && typeof data.prizePool === 'number') {
           regiaStateManager.syncPrizesState({
             prizePool: data.prizePool,
             currency: data.currency || undefined,
           });
+        }
+        break;
+
+      case 'COLORS_UPDATED':
+      case 'UPDATE_COLORS':
+        if (!handledByController && data.colors && typeof data.colors === 'object') {
+          const prevColors = regiaStateManager.getState().colors;
+          regiaStateManager.syncColorsState({
+            blue: { count: prevColors.blue.count, active: Boolean(data.colors.blue) },
+            orange: { count: prevColors.orange.count, active: Boolean(data.colors.orange) },
+            green: { count: prevColors.green.count, active: Boolean(data.colors.green) },
+            yellow: { count: prevColors.yellow.count, active: Boolean(data.colors.yellow) },
+          });
+        }
+        break;
+
+      case 'GRAPHICS_UPDATED':
+      case 'UPDATE_GRAPHICS':
+        if (!handledByController && data.tvGraphics && typeof data.tvGraphics === 'object') {
+          regiaStateManager.syncGraphicsState(data.tvGraphics);
         }
         break;
 
@@ -633,4 +914,7 @@ class ClientWebSocketManager {
 
 export { regiaStateManager };
 export const clientWsManager = new ClientWebSocketManager();
-(window as any).ClientWsManager = clientWsManager;
+if (typeof window !== 'undefined') {
+  (window as any).ClientWsManager = clientWsManager;
+  (window as any).initializeWebSocketChannel = initializeWebSocketChannel;
+}

@@ -4056,6 +4056,18 @@ nav > .box-id-badge {
   box-shadow: 0 0 10px rgba(245, 158, 11, 0.25) !important;
 }
 
+.regia-ws-badge.reconnecting {
+  background: rgba(146, 64, 14, 0.55) !important;
+  border-color: rgba(251, 191, 36, 0.75) !important;
+  color: #fde68a !important;
+  animation: wsReconnectPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes wsReconnectPulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(245, 158, 11, 0.25); }
+  50% { box-shadow: 0 0 16px rgba(251, 191, 36, 0.55); }
+}
+
 .regia-ws-badge.local-sync {
   background: rgba(14, 116, 144, 0.45) !important;
   border-color: rgba(56, 189, 248, 0.5) !important;
@@ -4201,10 +4213,11 @@ nav > .box-id-badge {
   animation: wsHeartbeatBeat 0.35s ease-out;
 }
 
-.regia-ws-badge.connecting .ws-heartbeat-dot {
+.regia-ws-badge.connecting .ws-heartbeat-dot,
+.regia-ws-badge.reconnecting .ws-heartbeat-dot {
   background: #f59e0b;
-  box-shadow: 0 0 8px #f59e0b;
-  animation: wsHeartbeatRhythm 0.8s infinite ease-in-out;
+  box-shadow: 0 0 8px #fbbf24;
+  animation: wsHeartbeatRhythm 0.75s infinite ease-in-out;
 }
 
 .regia-ws-badge.local-sync .ws-heartbeat-dot {
@@ -4289,6 +4302,15 @@ nav > .box-id-badge {
   background: rgba(148, 163, 184, 0.3) !important;
 }
 
+.ws-signal-bars.reconnecting .bar-1 {
+  background: #fbbf24 !important;
+  box-shadow: 0 0 4px rgba(251, 191, 36, 0.7);
+}
+.ws-signal-bars.reconnecting .bar-2,
+.ws-signal-bars.reconnecting .bar-3 {
+  background: rgba(251, 191, 36, 0.28) !important;
+}
+
 /* 3. Status Text */
 .ws-status-text {
   font-family: inherit;
@@ -4335,6 +4357,12 @@ nav > .box-id-badge {
   background: rgba(100, 116, 139, 0.2);
   border-color: rgba(148, 163, 184, 0.3);
   color: #94a3b8;
+}
+
+.ws-latency-pill.reconnecting {
+  background: rgba(245, 158, 11, 0.25);
+  border-color: rgba(251, 191, 36, 0.6);
+  color: #fef08a;
 }
 
 .regia-header-controls .regia-btn.regia-btn-tv-ext {

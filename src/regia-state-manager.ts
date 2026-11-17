@@ -139,6 +139,12 @@ export interface RegiaStateSnapshot {
     wsUrl: string | null;
     fallbackActive: boolean;
     staticHostMode: boolean;
+    reconnecting: boolean;
+    reconnectAttempt: number;
+    reconnectMaxAttempts: number;
+    reconnectDelayMs: number;
+    reconnectRemainingSeconds: number;
+    reconnectExhausted: boolean;
   };
   logs: RegiaLogEntry[];
 }
@@ -403,6 +409,12 @@ export function createInitialRegiaState(): RegiaStateSnapshot {
       wsUrl: null,
       fallbackActive: false,
       staticHostMode: false,
+      reconnecting: false,
+      reconnectAttempt: 0,
+      reconnectMaxAttempts: 10,
+      reconnectDelayMs: 0,
+      reconnectRemainingSeconds: 0,
+      reconnectExhausted: false,
     },
     logs: [
       {
@@ -1233,7 +1245,20 @@ export class RegiaStateManager {
 
   private renderConnectionHeaderToDOM() {
     if (typeof document === 'undefined') return;
-    const { status, clientCount, latencyMs, wsUrl, fallbackActive, staticHostMode } = this.state.connection;
+    const {
+      status,
+      clientCount,
+      latencyMs,
+      wsUrl,
+      fallbackActive,
+      staticHostMode,
+      reconnecting,
+      reconnectAttempt,
+      reconnectMaxAttempts,
+      reconnectDelayMs,
+      reconnectRemainingSeconds,
+      reconnectExhausted,
+    } = this.state.connection;
 
     const badge = document.getElementById('regiaWsBadge');
     const txt = document.getElementById('regiaWsText');
@@ -1242,30 +1267,52 @@ export class RegiaStateManager {
     const val = document.getElementById('wsLatencyVal');
     const dot = document.getElementById('wsHeartbeatDot');
 
-    const badgeState: 'active' | 'local-sync' | 'connecting' | 'offline' =
+    const isActivelyReconnecting = Boolean(
+      reconnecting && !reconnectExhausted && status !== 'connected' && !staticHostMode
+    );
+
+    const badgeState: 'active' | 'local-sync' | 'reconnecting' | 'connecting' | 'offline' =
       status === 'connected'
         ? 'active'
         : staticHostMode
           ? 'local-sync'
-          : status === 'connecting'
-            ? 'connecting'
-            : 'offline';
-    const label =
-      status === 'connected'
-        ? `WS Live (${clientCount} ${clientCount === 1 ? 'schermo' : 'schermi'})`
-        : staticHostMode
-          ? 'Sync Locale (Attivo)'
-          : status === 'connecting'
-            ? 'Connessione WS...'
-            : fallbackActive
-              ? 'WS Locale (Fallback)'
-              : 'WS In Riconnessione...';
+          : isActivelyReconnecting
+            ? 'reconnecting'
+            : status === 'connecting'
+              ? 'connecting'
+              : 'offline';
+
+    let label: string;
+    if (status === 'connected') {
+      label = `WS Live (${clientCount} ${clientCount === 1 ? 'schermo' : 'schermi'})`;
+    } else if (staticHostMode) {
+      label = 'Sync Locale (Attivo)';
+    } else if (isActivelyReconnecting) {
+      const attemptLabel = `${Math.max(1, reconnectAttempt)}/${Math.max(1, reconnectMaxAttempts)}`;
+      label =
+        reconnectRemainingSeconds > 0
+          ? `Riconnessione #${attemptLabel} (tra ${reconnectRemainingSeconds}s)`
+          : `Tentativo WS #${attemptLabel}...`;
+    } else if (reconnectExhausted) {
+      label = fallbackActive ? 'WS Offline (Fallback Locale)' : 'WS Disconnesso';
+    } else if (status === 'connecting') {
+      label = 'Connessione WS...';
+    } else if (fallbackActive) {
+      label = 'WS Locale (Fallback)';
+    } else {
+      label = 'WS In Riconnessione...';
+    }
 
     if (badge) {
       badge.className = `regia-ws-badge ${badgeState}`;
+      badge.dataset.wsState = badgeState;
+      badge.dataset.reconnectAttempt = String(reconnectAttempt || 0);
+      badge.dataset.reconnectDelayMs = String(reconnectDelayMs || 0);
       if (staticHostMode) {
         badge.title =
           'Modalità Host Statico: Regia e TV Studio (2° Monitor) sincronizzati via BroadcastChannel nello stesso browser. Per WebSocket multi-dispositivo pubblica come Node Web Service (render.yaml).';
+      } else if (isActivelyReconnecting) {
+        badge.title = `Segnale WebSocket perso. Exponential backoff: tentativo ${reconnectAttempt} di ${reconnectMaxAttempts} (attesa ${(reconnectDelayMs / 1000).toFixed(1)}s)`;
       } else if (wsUrl) {
         badge.title = `WebSocket Live: ${wsUrl}`;
       }
@@ -1276,10 +1323,19 @@ export class RegiaStateManager {
       if (bars) bars.className = 'ws-signal-bars local-sync';
       if (pill) pill.className = 'ws-latency-pill local-sync';
       if (val) val.textContent = 'Locale';
+    } else if (badgeState === 'reconnecting') {
+      if (bars) bars.className = 'ws-signal-bars reconnecting';
+      if (pill) pill.className = 'ws-latency-pill reconnecting';
+      if (val) {
+        val.textContent =
+          reconnectRemainingSeconds > 0
+            ? `${reconnectRemainingSeconds}s`
+            : `#${Math.max(1, reconnectAttempt)}`;
+      }
     } else if (badgeState === 'offline') {
       if (bars) bars.className = 'ws-signal-bars offline';
       if (pill) pill.className = 'ws-latency-pill offline';
-      if (val) val.textContent = '-- ms';
+      if (val) val.textContent = reconnectExhausted ? 'Offline' : '-- ms';
     } else if (badgeState === 'connecting') {
       if (bars) bars.className = 'ws-signal-bars';
       if (pill) pill.className = 'ws-latency-pill';

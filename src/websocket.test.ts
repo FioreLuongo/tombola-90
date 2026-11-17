@@ -436,3 +436,168 @@ test('initWebSocket proceeds to WebSocket connection when /api/health returns JS
   });
 });
 
+test('resolvePrimaryWsEndpoint resolves __APP_WS_URL__ relative path /ws to same-origin ws/wss URL', () => {
+  const prev = (globalThis as Record<string, unknown>).__APP_WS_URL__;
+  try {
+    (globalThis as Record<string, unknown>).__APP_WS_URL__ = '/ws';
+    const localResolved = resolvePrimaryWsEndpoint(undefined, {
+      windowProtocol: 'http:',
+      windowHost: 'localhost:3000',
+      windowHostname: 'localhost',
+    });
+    assert.equal(localResolved, 'ws://localhost:3000/ws');
+
+    const prodResolved = resolvePrimaryWsEndpoint(undefined, {
+      windowProtocol: 'https:',
+      windowHost: 'tombola-90.onrender.com',
+      windowHostname: 'tombola-90.onrender.com',
+    });
+    assert.equal(prodResolved, 'wss://tombola-90.onrender.com/ws');
+  } finally {
+    if (prev === undefined) {
+      delete (globalThis as Record<string, unknown>).__APP_WS_URL__;
+    } else {
+      (globalThis as Record<string, unknown>).__APP_WS_URL__ = prev;
+    }
+  }
+});
+
+test('initWebSocket handles __APP_WS_URL__ handshake and delivers Regia -> TV realtime events', () => {
+  disconnectWebSocket(true);
+  const sentPayloads: string[] = [];
+  const receivedEvents: Array<{ type: string; origin: string; payload: any }> = [];
+  let activeSocket: any = null;
+
+  class ChannelWebSocket {
+    public readyState = 1;
+    public url: string;
+    public onopen: (() => void) | null = null;
+    public onerror: (() => void) | null = null;
+    public onclose: (() => void) | null = null;
+    public onmessage: ((ev: MessageEvent) => void) | null = null;
+    constructor(url: string) {
+      this.url = url;
+      activeSocket = this;
+      queueMicrotask(() => {
+        this.onopen?.();
+      });
+    }
+    send(payload: string) {
+      sentPayloads.push(payload);
+    }
+    close() {}
+  }
+
+  initWebSocket({
+    definedAppWsUrlOverride: 'wss://tombola-live.example.com/ws',
+    role: 'tv',
+    WebSocketImpl: ChannelWebSocket as unknown as typeof WebSocket,
+    BroadcastChannelImpl: MockBroadcastChannel as unknown as typeof BroadcastChannel,
+    onMessage: (data, origin) => {
+      receivedEvents.push({ type: data.type, origin, payload: data });
+    },
+  });
+
+  return new Promise<void>((resolve) => {
+    setTimeout(() => {
+      assert.equal(activeSocket?.url, 'wss://tombola-live.example.com/ws');
+      assert.ok(sentPayloads.some((p) => p.includes('"REGISTER_CLIENT"') && p.includes('"tv"')));
+
+      activeSocket.onmessage?.({
+        data: JSON.stringify({
+          type: 'NUMBER_EXTRACTED',
+          number: 24,
+          smorfia: 'Le guardie',
+        }),
+      } as MessageEvent);
+
+      activeSocket.onmessage?.({
+        data: JSON.stringify({
+          type: 'PRIZE_POOL_UPDATED',
+          prizePool: 350,
+          currency: '€',
+        }),
+      } as MessageEvent);
+
+      assert.equal(receivedEvents.length, 2);
+      assert.equal(receivedEvents[0].type, 'NUMBER_EXTRACTED');
+      assert.equal(receivedEvents[0].origin, 'websocket');
+      assert.equal(receivedEvents[0].payload.number, 24);
+      assert.equal(receivedEvents[1].type, 'PRIZE_POOL_UPDATED');
+      assert.equal(receivedEvents[1].payload.prizePool, 350);
+
+      disconnectWebSocket(true);
+      resolve();
+    }, 20);
+  });
+});
+
+test('computeExponentialBackoffDelay scales exponentially, respects maxDelayMs cap and jitterRatio', async () => {
+  const { computeExponentialBackoffDelay } = await import('./utils/ws-backoff.ts');
+
+  const cfg = { initialDelayMs: 1000, multiplier: 2, maxDelayMs: 30000, jitterRatio: 0, maxAttempts: 10 };
+  assert.equal(computeExponentialBackoffDelay(1, cfg), 1000);
+  assert.equal(computeExponentialBackoffDelay(2, cfg), 2000);
+  assert.equal(computeExponentialBackoffDelay(3, cfg), 4000);
+  assert.equal(computeExponentialBackoffDelay(4, cfg), 8000);
+  assert.equal(computeExponentialBackoffDelay(5, cfg), 16000);
+  assert.equal(computeExponentialBackoffDelay(6, cfg), 30000);
+  assert.equal(computeExponentialBackoffDelay(10, cfg), 30000);
+
+  const withJitter = computeExponentialBackoffDelay(
+    2,
+    { initialDelayMs: 1000, multiplier: 2, maxDelayMs: 30000, jitterRatio: 0.25 },
+    () => 0.5
+  );
+  assert.equal(withJitter, 2250);
+});
+
+test('initWebSocket with disableInternalReconnect triggers onConnectionLost exactly once per drop for external exponential backoff', () => {
+  disconnectWebSocket(true);
+  let attempts = 0;
+  const lostEvents: Array<{ reason: string; hadConnectedOnce: boolean; wsUrl: string | null }> = [];
+
+  class DroppingWebSocket {
+    public readyState = 1;
+    public onopen: (() => void) | null = null;
+    public onerror: (() => void) | null = null;
+    public onclose: (() => void) | null = null;
+    public onmessage: ((ev: MessageEvent) => void) | null = null;
+    constructor(_url: string) {
+      attempts++;
+      queueMicrotask(() => {
+        this.onopen?.();
+        setTimeout(() => {
+          this.readyState = 3;
+          this.onclose?.();
+        }, 10);
+      });
+    }
+    send() {}
+    close() {}
+  }
+
+  initWebSocket({
+    wsUrlOverride: 'wss://tombola-live.example.com/ws',
+    disableInternalReconnect: true,
+    WebSocketImpl: DroppingWebSocket as unknown as typeof WebSocket,
+    BroadcastChannelImpl: MockBroadcastChannel as unknown as typeof BroadcastChannel,
+    onConnectionLost: (info) => {
+      lostEvents.push(info);
+    },
+  });
+
+  return new Promise<void>((resolve) => {
+    setTimeout(() => {
+      assert.equal(attempts, 1);
+      assert.equal(lostEvents.length, 1);
+      assert.equal(lostEvents[0].hadConnectedOnce, true);
+      assert.equal(lostEvents[0].wsUrl, 'wss://tombola-live.example.com/ws');
+      disconnectWebSocket(true);
+      resolve();
+    }, 60);
+  });
+});
+
+
+
