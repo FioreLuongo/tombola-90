@@ -68,7 +68,7 @@
 </div>
 <div class="error-popup-overlay" id="errorPopup">
     <div class="error-popup-content">
-        <div style="font-size: 60px; color: var(--warning-color); margin-bottom: 15px;"><i class="fas fa-exclamation-triangle"></i></div>
+        <div id="errorPopupIcon" style="font-size: 60px; color: var(--warning-color); margin-bottom: 15px;"><i class="fas fa-exclamation-triangle"></i></div>
         <h2 id="errorPopupTitle">Attenzione</h2>
         <p id="errorPopupMessage"></p>
         <button class="error-popup-close" id="errorPopupClose">OK</button>
@@ -452,9 +452,14 @@
                                     <span class="cloud-dot unconfigured"></span> Appwrite
                                 </button>
                             </div>
-                            <button type="button" class="dual-db-config-btn" id="regiaDbConfigBtn" title="Configura modalità Dual-Database (Firebase + Server DB + Appwrite opzionale)">
-                                <i class="fas fa-sliders-h"></i> Dual-DB
-                            </button>
+                            <div class="dual-db-actions-group">
+                                <button type="button" class="dual-db-config-btn pdf-quick" id="regiaAppwritePdfBtn" title="Scarica la Guida PDF Passo-Passo per configurare Appwrite Cloud">
+                                    <i class="fas fa-file-pdf"></i> PDF Appwrite
+                                </button>
+                                <button type="button" class="dual-db-config-btn" id="regiaDbConfigBtn" title="Configura modalità Dual-Database (Firebase + Server DB + Appwrite opzionale)">
+                                    <i class="fas fa-sliders-h"></i> Dual-DB
+                                </button>
+                            </div>
                         </div>
 
                         <!-- Non Vinti della Partita Attuale -->
@@ -1322,13 +1327,13 @@ firebase deploy --only hosting</code></pre>
           </p>
           <ul class="guide-ordered-list">
             <li><b>1) Table / Collection <code>jackpot_bank</code></b>:
-              <code>accumulatedUnclaimed</code> (Float), <code>currentGameUnclaimed</code> (Float), <code>currency</code> (String, size 8), <code>lastUpdated</code> (String, size 40), <code>totalGamesRecorded</code> (Integer).
+              <code>accumulatedUnclaimed</code> (Float, Default: 0), <code>currentGameUnclaimed</code> (Float, Default: 0), <code>currency</code> (String, size 8, Default: £), <code>lastUpdated</code> (String, size 40), <code>totalGamesRecorded</code> (Integer, Default: 0).
             </li>
             <li><b>2) Table / Collection <code>unclaimed_history</code></b>:
-              <code>timestamp</code> (String, size 40), <code>gameId</code> (String, size 64), <code>type</code> (String, size 32), <code>amount</code> (Float), <code>balanceAfter</code> (Float), <code>prizeCategory</code> (String, size 64), <code>note</code> (String, size 250).
+              <code>timestamp</code> (String, size 40, Req), <code>gameId</code> (String, size 64, Req), <code>type</code> (String, size 32, Req), <code>amount</code> (Float, Req), <code>balanceAfter</code> (Float, Req), <code>prizeCategory</code> (String, size 64, Default: all), <code>note</code> (String, size 250).
             </li>
             <li><b>3) Table / Collection <code>regia_config</code></b>:
-              <code>activeProfileId</code> (String, size 64), <code>payloadJson</code> (String, size 4000), <code>updatedAt</code> (String, size 40).
+              <code>activeProfileId</code> (String, size 64, Req), <code>payloadJson</code> (String, size 4000, Req), <code>updatedAt</code> (String, size 40, Req).
             </li>
           </ul>
         </div>
@@ -1399,7 +1404,7 @@ Tabelle:     1) jackpot_bank   2) unclaimed_history   3) regia_config</pre>
           <pre>1) ID: jackpot_bank
    - accumulatedUnclaimed : Float   (Required: No/Yes, Default: 0)
    - currentGameUnclaimed : Float   (Required: No,     Default: 0)
-   - currency             : String  (Size: 8,  Required: No, Default vuoto o EUR)
+   - currency             : String  (Size: 8,  Required: No, Default: £ o vuoto)
    - lastUpdated          : String  (Size: 40, Required: No, Default vuoto)
    - totalGamesRecorded   : Integer (Required: No,     Default: 0)
 
@@ -1422,8 +1427,8 @@ Tabelle:     1) jackpot_bank   2) unclaimed_history   3) regia_config</pre>
       <div class="guide-section-block">
         <h3><span class="step-badge">4</span> Imposta i Permessi &ldquo;Any&rdquo; su Tutte e 3 le Tabelle</h3>
         <ol class="guide-ordered-list">
-          <li>Apri ognuna delle 3 tabelle (<code>jackpot_bank</code>, <code>unclaimed_history</code>, <code>regia_config</code>) &rarr; scheda <b>Settings</b> &rarr; sezione <b>Permissions</b>.</li>
-          <li>Clicca <b>+ Add role</b> &rarr; seleziona <b>Any</b> (All guests and users).</li>
+          <li>Apri ognuna delle 3 tabelle (<code>jackpot_bank</code>, <code>unclaimed_history</code>, <code>regia_config</code>) &rarr; scheda <b>Settings</b>.</li>
+          <li>Verifica che <b>Row security</b> / <b>Document security</b> resti <b>OFF</b>, poi vai su <b>Permissions</b> &rarr; <b>+ Add role</b> &rarr; seleziona <b>Any</b> (All guests and users).</li>
           <li>Spunta <b>Create</b>, <b>Read</b>, <b>Update</b> (opzionale: Delete) e clicca <b>Update</b> in basso a destra.</li>
           <li>Torna in Console Regia &rarr; <b>Dual-DB</b> &rarr; clicca <b>Precompila (6af8bbbf...)</b> &rarr; <b>Salva &amp; Connetti Appwrite</b>.</li>
         </ol>

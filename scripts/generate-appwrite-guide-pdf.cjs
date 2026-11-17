@@ -336,7 +336,7 @@ async function generateAppwriteGuidePDF() {
   drawSchemaTable('1) TABELLA CASSA MONTEPREMI', 'jackpot_bank', [
     ['accumulatedUnclaimed', 'Float', '-', 'No (o Yes)', '0'],
     ['currentGameUnclaimed', 'Float', '-', 'No', '0'],
-    ['currency', 'String', '8', 'No', 'EUR / € (lascia vuoto o €)'],
+    ['currency', 'String', '8', 'No', '£ / EUR (Default: £)'],
     ['lastUpdated', 'String', '40', 'No', '(lascia vuoto)'],
     ['totalGamesRecorded', 'Integer', '-', 'No', '0'],
   ]);
@@ -401,11 +401,11 @@ async function generateAppwriteGuidePDF() {
     'Senza i permessi pubblici abilitati, Appwrite risponde con Errore 401/403. Esegui questi passaggi su',
     'TUTTE E 3 le tabelle ("jackpot_bank", "unclaimed_history" e "regia_config"):',
     '  1. Apri la tabella -> clicca sulla scheda "Settings" in alto.',
-    '  2. Scorri fino alla sezione "Permissions".',
-    '  3. Clicca "+ Add role" -> scegli "Any" (All guests and users).',
+    '  2. Verifica che "Row security" / "Document security" resti DISATTIVATO (OFF).',
+    '  3. Scorri fino alla sezione "Permissions" -> clicca "+ Add role" -> scegli "Any" (All guests).',
     '  4. Spunta le caselle:  [x] Create   [x] Read   [x] Update   (opzionale: Delete).',
     '  5. Clicca sul pulsante "Update" in basso a destra per salvare i permessi.',
-    '  * Nota sicurezza: se invece vuoi usare il ruolo "Users", vai su Auth -> Settings -> abilita "Anonymous"',
+    '  * Nota sicurezza: se preferisci usare il ruolo "Users", vai su Auth -> Settings -> abilita "Anonymous"',
     '    e spunta "Attiva Sessione Anonima Appwrite" nella modale Dual-DB di Tombola 90.',
   ];
   permLines.forEach((line, i) => {
@@ -413,26 +413,25 @@ async function generateAppwriteGuidePDF() {
       x: 40,
       y,
       size: 8.7,
-      font: i === 1 || line.includes('Create') ? fontBold : fontRegular,
+      font: i === 1 || line.includes('Create') || line.includes('DISATTIVATO') ? fontBold : fontRegular,
       color: line.includes('Create') ? green : textDark,
     });
     y -= 14.5;
   });
-  y -= 12;
+  y -= 10;
 
   drawSectionBadge(page3, 35, y, 5, 'PASSO 5: COLLEGA E VERIFICA IN CONSOLE REGIA');
   y -= 20;
   const connectLines = [
-    '1. Apri LUONGO TOMBOLA 90 ITALIA -> entra nella "Console Regia".',
-    '2. Nel box "Cassa Cloud Montepremi Non Vinti", clicca il pulsante "Dual-DB".',
-    '3. Controlla che i 6 campi contengano esattamente:',
+    '1. Apri LUONGO TOMBOLA 90 ITALIA -> entra nella "Console Regia" -> box Cassa Cloud -> "Dual-DB".',
+    '2. Clicca il pulsante rapido "Precompila (6af8bbbf...)" per riempire subito i 6 campi:',
     '   - API Endpoint Appwrite:            https://fra.cloud.appwrite.io/v1',
     '   - Project ID Appwrite:              6af8bbbf003dea6b4e91',
     '   - Database ID Appwrite:             tombola_db',
     '   - Collection ID Cassa Montepremi:  jackpot_bank',
     '   - Collection ID Storico Movimenti:  unclaimed_history',
     '   - Collection ID Configurazione:     regia_config',
-    '4. Clicca "Salva & Connetti Appwrite".',
+    '3. Clicca "Salva & Connetti Appwrite" per avviare il test automatico e la sincronizzazione.',
   ];
   connectLines.forEach((line) => {
     const isCode = line.startsWith('   - ');

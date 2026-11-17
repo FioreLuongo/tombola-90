@@ -20,6 +20,28 @@ export const DEFAULT_TAVOLO_GAME_ID = 'TAV-G001';
 export const DEFAULT_TAVOLO_SHEETS_COUNT = 30;
 export const TAVOLO_SETS_LOCAL_CACHE_KEY = 'tombola_tavolo_sets_cache_v1';
 export const TAVOLO_UI_PREFS_LOCAL_KEY = 'tombola_tavolo_ui_prefs_v1';
+export const TAVOLO_FIRESTORE_TIMEOUT_MS = 5000;
+
+export function withTimeout<T>(promise: Promise<T>, timeoutMs: number = TAVOLO_FIRESTORE_TIMEOUT_MS, label: string = 'Operazione'): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return promise;
+  }
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timeout dopo ${timeoutMs}ms`));
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
 
 const TAVOLO_COLORS = ['blue', 'orange', 'green', 'yellow'] as const;
 
@@ -492,7 +514,7 @@ export async function savePermanentTavoloSet(set: TavoloSetRecord): Promise<{
   if (fsDb) {
     try {
       const metaRef = doc(fsDb, 'tavolo_sets', cleanSet.id);
-      await setDoc(metaRef, buildMetaPayload(cleanSet));
+      await withTimeout(setDoc(metaRef, buildMetaPayload(cleanSet)), TAVOLO_FIRESTORE_TIMEOUT_MS, 'Firestore setDoc tavolo_sets');
 
       const BATCH_SIZE = 15;
       for (let i = 0; i < cleanSet.sheets.length; i += BATCH_SIZE) {
@@ -510,12 +532,12 @@ export async function savePermanentTavoloSet(set: TavoloSetRecord): Promise<{
             updatedAt: cleanSet.updatedAt,
           });
         }
-        await batch.commit();
+        await withTimeout(batch.commit(), TAVOLO_FIRESTORE_TIMEOUT_MS, 'Firestore batch.commit sheets');
       }
       savedToFirestore = true;
     } catch (err: any) {
       lastError = err?.message || 'Errore salvataggio Firestore Tavolo';
-      console.warn('[TavoloService] Salvataggio Firestore fallito (mantenuto su Server DB / Cache):', err);
+      console.warn('[TavoloService] Salvataggio Firestore fallito/timeout (mantenuto su Server DB / Cache):', err);
     }
   }
 
@@ -568,10 +590,10 @@ export async function loadPermanentTavoloSet(
   const fsDb = getTavoloFirestore();
   if (fsDb) {
     try {
-      const metaSnap = await getDoc(doc(fsDb, 'tavolo_sets', setId));
+      const metaSnap = await withTimeout(getDoc(doc(fsDb, 'tavolo_sets', setId)), TAVOLO_FIRESTORE_TIMEOUT_MS, 'Firestore getDoc tavolo_sets');
       if (metaSnap.exists()) {
         const meta = metaSnap.data() as Partial<TavoloSetMeta>;
-        const sheetsSnap = await getDocs(collection(fsDb, 'tavolo_sets', setId, 'sheets'));
+        const sheetsSnap = await withTimeout(getDocs(collection(fsDb, 'tavolo_sets', setId, 'sheets')), TAVOLO_FIRESTORE_TIMEOUT_MS, 'Firestore getDocs sheets');
         const sheets: Partial<TavoloSheetData>[] = [];
         sheetsSnap.forEach((d) => sheets.push(d.data() as Partial<TavoloSheetData>));
         const cleanFs = sanitizeTavoloSetRecord({
@@ -590,7 +612,7 @@ export async function loadPermanentTavoloSet(
         }
       }
     } catch (err) {
-      console.warn('[TavoloService] Lettura Firestore non disponibile, uso Server DB / Cache:', err);
+      console.warn('[TavoloService] Lettura Firestore non disponibile/timeout, uso Server DB / Cache:', err);
     }
   }
 
@@ -664,10 +686,10 @@ export async function listSavedTavoloSets(): Promise<TavoloSetMeta[]> {
   const fsDb = getTavoloFirestore();
   if (fsDb) {
     try {
-      const snap = await getDocs(collection(fsDb, 'tavolo_sets'));
+      const snap = await withTimeout(getDocs(collection(fsDb, 'tavolo_sets')), TAVOLO_FIRESTORE_TIMEOUT_MS, 'Firestore list tavolo_sets');
       snap.forEach((d) => upsertMeta(d.data() as Partial<TavoloSetMeta>));
     } catch {
-      // Ignore network / offline error
+      // Ignore network / timeout / offline error
     }
   }
 
@@ -703,9 +725,9 @@ export async function saveTavoloActiveSheetsSelection(
   if (fsDb) {
     try {
       const metaRef = doc(fsDb, 'tavolo_sets', setId);
-      const snap = await getDoc(metaRef);
+      const snap = await withTimeout(getDoc(metaRef), TAVOLO_FIRESTORE_TIMEOUT_MS, 'Firestore getDoc activeSheets');
       if (snap.exists()) {
-        await setDoc(metaRef, { activeSheets, updatedAt }, { merge: true });
+        await withTimeout(setDoc(metaRef, { activeSheets, updatedAt }, { merge: true }), TAVOLO_FIRESTORE_TIMEOUT_MS, 'Firestore setDoc activeSheets');
       }
     } catch (err) {
       console.warn('[TavoloService] Aggiornamento activeSheets Firestore non riuscito:', err);

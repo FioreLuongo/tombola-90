@@ -311,7 +311,8 @@ export function initOnlineGuideManager() {
   bindBtn('regiaOpenGuideModalBtn', openOnlineGuideModal);
   bindBtn('regiaDownloadCodeZipBtn', downloadProjectZip);
 
-  // Bottoni Guida Appwrite (Dual-DB Modal + Modale Guida Appwrite)
+  // Bottoni Guida Appwrite (Barra Regia + Dual-DB Modal + Modale Guida Appwrite)
+  bindBtn('regiaAppwritePdfBtn', downloadAppwriteGuidePDF);
   bindBtn('downloadAppwritePdfBtn', downloadAppwriteGuidePDF);
   bindBtn('openAppwriteGuideModalBtn', openAppwriteGuideModal);
   bindBtn('closeAppwriteGuideModalBtn', closeAppwriteGuideModal);

@@ -5484,6 +5484,13 @@ body:not(.dark-mode) .deploy-pill {
   color: #fde047;
 }
 
+.dual-db-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
 .dual-db-config-btn {
   display: inline-flex;
   align-items: center;
@@ -5502,6 +5509,17 @@ body:not(.dark-mode) .deploy-pill {
 
 .dual-db-config-btn:hover {
   background: rgba(56, 189, 248, 0.28);
+  color: #ffffff;
+}
+
+.dual-db-config-btn.pdf-quick {
+  background: rgba(244, 63, 94, 0.16);
+  border-color: rgba(244, 63, 94, 0.45);
+  color: #fda4af;
+}
+
+.dual-db-config-btn.pdf-quick:hover {
+  background: rgba(244, 63, 94, 0.3);
   color: #ffffff;
 }
 
@@ -5836,6 +5854,17 @@ body:not(.dark-mode) .dual-db-config-btn {
 body:not(.dark-mode) .dual-db-config-btn:hover {
   background: #bae6fd;
   color: #0c4a6e;
+}
+
+body:not(.dark-mode) .dual-db-config-btn.pdf-quick {
+  background: #ffe4e6;
+  border-color: #fda4af;
+  color: #be123c;
+}
+
+body:not(.dark-mode) .dual-db-config-btn.pdf-quick:hover {
+  background: #fecdd3;
+  color: #881337;
 }
 
 body:not(.dark-mode) .regia-current-unclaimed-row {
@@ -7627,8 +7656,26 @@ body:not(.dark-mode) .error-popup-content {
 }
 
 body:not(.dark-mode) .popup-content h3,
-body:not(.dark-mode) .confirm-popup-content h3 {
+body:not(.dark-mode) .confirm-popup-content h3,
+body:not(.dark-mode) #confirmPopupTitle,
+body:not(.dark-mode) #errorPopupTitle {
   color: #92400e !important;
+}
+
+body:not(.dark-mode) #confirmPopupMessage,
+body:not(.dark-mode) #errorPopupMessage {
+  color: #1e293b !important;
+}
+
+body:not(.dark-mode) .confirm-popup-btn.cancel {
+  background: #e2e8f0 !important;
+  color: #1e293b !important;
+  border: 1px solid #94a3b8 !important;
+}
+
+body:not(.dark-mode) .confirm-popup-btn.cancel:hover {
+  background: #cbd5e1 !important;
+  color: #0f172a !important;
 }
 
 body:not(.dark-mode) .win-popup-content {
@@ -7691,9 +7738,48 @@ body:not(.dark-mode) .cartelle-header {
   box-shadow: 0 6px 18px rgba(120, 53, 15, 0.1) !important;
 }
 
+body:not(.dark-mode) .cartelle-title {
+  color: #78350f !important;
+}
+
+body:not(.dark-mode) .cartelle-mode-tabs {
+  background: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+}
+
+body:not(.dark-mode) .mode-tab-btn {
+  color: #334155 !important;
+}
+
+body:not(.dark-mode) .mode-tab-btn:hover {
+  color: #0f172a !important;
+  background: #e2e8f0 !important;
+}
+
+body:not(.dark-mode) .mode-tab-btn.active {
+  color: #090d16 !important;
+  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+}
+
 body:not(.dark-mode) .cartelle-controls {
   background: #ffffff !important;
   border: 1px solid #e2e8f0 !important;
+}
+
+body:not(.dark-mode) .tavolo-toolbar,
+body:not(.dark-mode) .cartelle-input-group {
+  background: #f8fafc !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+body:not(.dark-mode) .cartelle-label {
+  color: #78350f !important;
+}
+
+body:not(.dark-mode) .cartelle-input {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid #94a3b8 !important;
 }
 
 body:not(.dark-mode) .cartella {

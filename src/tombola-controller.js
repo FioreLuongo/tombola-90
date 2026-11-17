@@ -978,7 +978,7 @@ function startTombolaApp() {
         let totalNumbersInActive = 0;
         activeCartelle.forEach(cartella => {
             cartella.numbers.forEach(n => {
-                if (extractedNumbers.includes(n)) coverage++;
+                if (extractedNumbers.includes(n.number)) coverage++;
                 totalNumbersInActive++;
             });
         });
@@ -1198,37 +1198,73 @@ function startTombolaApp() {
         return true;
     }
 
+    let errorPopupAutoCloseTimer = null;
+
     function showErrorPopup(message) {
-        document.getElementById('errorPopupMessage').textContent = message;
-        document.getElementById('errorPopup').style.display = 'flex';
+        const popup = document.getElementById('errorPopup');
+        const titleEl = document.getElementById('errorPopupTitle');
+        const iconWrap = document.getElementById('errorPopupIcon');
+        const msgEl = document.getElementById('errorPopupMessage');
+        if (!popup || !msgEl) return;
+        if (errorPopupAutoCloseTimer) {
+            clearTimeout(errorPopupAutoCloseTimer);
+            errorPopupAutoCloseTimer = null;
+        }
+        const box = popup.querySelector('.error-popup-content') || popup.firstElementChild;
+        if (box) box.style.borderTop = '';
+        if (titleEl) titleEl.textContent = currentLanguage === 'it' ? 'Attenzione' : 'Warning';
+        if (iconWrap) {
+            iconWrap.style.color = 'var(--warning-color)';
+            iconWrap.innerHTML = '<i class="fas fa-exclamation-triangle"></i>';
+        }
+        msgEl.textContent = message;
+        popup.style.display = 'flex';
     }
 
     function showSuccessPopup(message) {
-        // Usa lo stesso popup di errore ma con colore verde per i successi
         const popup = document.getElementById('errorPopup');
+        const titleEl = document.getElementById('errorPopupTitle');
+        const iconWrap = document.getElementById('errorPopupIcon');
         const msg = document.getElementById('errorPopupMessage');
+        if (!popup || !msg) return;
+        if (errorPopupAutoCloseTimer) {
+            clearTimeout(errorPopupAutoCloseTimer);
+            errorPopupAutoCloseTimer = null;
+        }
+        if (titleEl) titleEl.textContent = currentLanguage === 'it' ? 'Operazione Completata' : 'Completed';
+        if (iconWrap) {
+            iconWrap.style.color = '#2ecc71';
+            iconWrap.innerHTML = '<i class="fas fa-check-circle"></i>';
+        }
         msg.textContent = message;
         popup.style.display = 'flex';
-        const box = popup.querySelector('.error-popup-box') || popup.firstElementChild;
+        const box = popup.querySelector('.error-popup-content') || popup.firstElementChild;
         if (box) {
             box.style.borderTop = '5px solid #2ecc71';
-            setTimeout(() => { box.style.borderTop = ''; }, 3000);
         }
-        setTimeout(() => { popup.style.display = 'none'; }, 3000);
+        errorPopupAutoCloseTimer = setTimeout(() => {
+            popup.style.display = 'none';
+            if (box) box.style.borderTop = '';
+            errorPopupAutoCloseTimer = null;
+        }, 3000);
     }
 
     let pendingConfirmAction = null;
 
-    function showConfirmDialog(title, message, onConfirm) {
+    function showConfirmDialog(title, message, onConfirm, confirmLabel = null) {
         const popup = document.getElementById('confirmPopup');
         const titleEl = document.getElementById('confirmPopupTitle');
         const msgEl = document.getElementById('confirmPopupMessage');
+        const okBtn = document.getElementById('confirmPopupOk');
         if (!popup || !titleEl || !msgEl) {
             if (onConfirm) onConfirm();
             return;
         }
         titleEl.textContent = title;
         msgEl.innerHTML = message;
+        if (okBtn) {
+            okBtn.textContent = confirmLabel || (currentLanguage === 'it' ? 'Conferma' : 'Confirm');
+        }
         pendingConfirmAction = onConfirm;
         popup.style.display = 'flex';
     }
@@ -2885,39 +2921,46 @@ function startTombolaApp() {
         }
     }
 
+    let isExtractingInFlight = false;
+
     async function extractNumber() {
-        if (extractedNumbers.length === 0 && !rolloverRecalledThisGame) {
-            await maybeAutoRecallBankIntoNextGame('extract_single');
-        }
-        if (!canStartGame()) return;
-
-        if (numeroGold === null && generatedCartelle.length > 0) {
-            getGoldNumberForExtraction();
-        }
-
-        if (extractedNumbers.length >= 90) { showTombolaPopup(); stopTimer(); return; }
-        if (cartelleWins.tombola.gameEnded) {
-            showErrorPopup(currentLanguage === 'it' ? "Il gioco è terminato! Qualcuno ha fatto Tombola." : "The game is over! Someone made Tombola.");
-            return;
-        }
-        if (isPausedForWin) {
-            showErrorPopup(currentLanguage === 'it' ? "L'estrazione è in pausa per una vincita. Clicca 'CONTINUA' nel popup per riprendere." : "Extraction is paused for a win. Click 'CONTINUA' in the popup to resume.");
-            return;
-        }
-
-        let newNumber;
-        newNumber = selectOptimalNumberWithAdvancedAI();
-
-        if (newNumber === null) {
-            if (extractedNumbers.length === 89) {
-                showTombolaPopup();
-                stopTimer();
-                handleGameEndWithoutTombola();
+        if (isExtractingInFlight) return;
+        isExtractingInFlight = true;
+        try {
+            if (extractedNumbers.length === 0 && !rolloverRecalledThisGame) {
+                await maybeAutoRecallBankIntoNextGame('extract_single');
             }
-            return;
-        }
+            if (!canStartGame()) return;
 
-        processExtractedNumber(newNumber, false);
+            if (numeroGold === null && generatedCartelle.length > 0) {
+                getGoldNumberForExtraction();
+            }
+
+            if (extractedNumbers.length >= 90) { showTombolaPopup(); stopTimer(); return; }
+            if (cartelleWins.tombola.gameEnded) {
+                showErrorPopup(currentLanguage === 'it' ? "Il gioco è terminato! Qualcuno ha fatto Tombola." : "The game is over! Someone made Tombola.");
+                return;
+            }
+            if (isPausedForWin) {
+                showErrorPopup(currentLanguage === 'it' ? "L'estrazione è in pausa per una vincita. Clicca 'CONTINUA' nel popup per riprendere." : "Extraction is paused for a win. Click 'CONTINUA' in the popup to resume.");
+                return;
+            }
+
+            const newNumber = selectOptimalNumberWithAdvancedAI();
+
+            if (newNumber === null) {
+                if (extractedNumbers.length === 89) {
+                    showTombolaPopup();
+                    stopTimer();
+                    handleGameEndWithoutTombola();
+                }
+                return;
+            }
+
+            processExtractedNumber(newNumber, false);
+        } finally {
+            isExtractingInFlight = false;
+        }
     }
 
     function updateLastNumbers(newNumber) {
@@ -2938,18 +2981,22 @@ function startTombolaApp() {
         if (!fromRemote && extractedNumbers.length === 0 && !rolloverRecalledThisGame) {
             await maybeAutoRecallBankIntoNextGame('start_timer');
         }
-        if (!canStartGame()) return;
+        if (!fromRemote && !canStartGame()) return;
 
-        if (numeroGold === null && generatedCartelle.length > 0) {
+        if (!fromRemote && numeroGold === null && generatedCartelle.length > 0) {
             getGoldNumberForExtraction();
         }
 
         if (isPausedForWin) {
-            showErrorPopup(currentLanguage === 'it' ? "L'estrazione è in pausa per una vincita. Clicca 'CONTINUA' nel popup per riprendere." : "Extraction is paused for a win. Click 'CONTINUA' in the popup to resume.");
+            if (!fromRemote) {
+                showErrorPopup(currentLanguage === 'it' ? "L'estrazione è in pausa per una vincita. Clicca 'CONTINUA' nel popup per riprendere." : "Extraction is paused for a win. Click 'CONTINUA' in the popup to resume.");
+            }
             return;
         }
         if (cartelleWins.tombola.gameEnded) {
-            showErrorPopup(currentLanguage === 'it' ? "Il gioco è terminato! Qualcuno ha fatto Tombola." : "The game is over! Someone made Tombola.");
+            if (!fromRemote) {
+                showErrorPopup(currentLanguage === 'it' ? "Il gioco è terminato! Qualcuno ha fatto Tombola." : "The game is over! Someone made Tombola.");
+            }
             return;
         }
         if (!isRunning) {
@@ -2962,17 +3009,20 @@ function startTombolaApp() {
                 startTime = new Date();
                 gameTimerInterval = setInterval(() => {
                     gameSeconds++;
-                },1000);
+                }, 1000);
             }
+            clearInterval(countdownInterval);
             countdownInterval = setInterval(() => {
                 remainingTime--;
                 updateCountdown();
                 if (remainingTime <= 0) {
-                    extractNumber();
+                    if (!fromRemote) {
+                        void extractNumber();
+                    }
                     remainingTime = currentTimer;
                     updateCountdown();
                 }
-            },1000);
+            }, 1000);
 
             if (!fromRemote && window.TombolaSync) {
                 window.TombolaSync.broadcastStartTimer(currentTimer);
@@ -3142,7 +3192,7 @@ function startTombolaApp() {
 
         initColorControls();
         updateAIAnalysisDisplay();
-        stopTimer();
+        stopTimer(fromRemote);
         clearInterval(gameTimerInterval);
         remainingTime = currentTimer;
         updateCountdown();
@@ -3401,7 +3451,7 @@ function startTombolaApp() {
         }
 
         if (winningType === 'tombola') {
-            stopTimer();
+            stopTimer(fromRemote);
             isPausedForWin = true;
             cartelleWins.tombola.gameEnded = true;
             document.getElementById('startBtn').disabled = true;
@@ -3430,7 +3480,7 @@ function startTombolaApp() {
         } else {
             // Modalità con auto-ripresa a tempo (consigliata) o manuale
             const wasRunning = isRunning;
-            stopTimer();
+            stopTimer(fromRemote);
             wasAutoRunningBeforeWin = wasRunning;
             isPausedForWin = true;
             document.getElementById('startBtn').disabled = true;
@@ -5727,6 +5777,10 @@ function startTombolaApp() {
             if (data && data.number) {
                 if (!extractedNumbers.includes(data.number)) {
                     processExtractedNumber(data.number, true, data.smorfia);
+                }
+                if (isRunning) {
+                    remainingTime = currentTimer;
+                    updateCountdown();
                 }
             }
         });

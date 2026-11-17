@@ -51,7 +51,7 @@ function createDefaultGameState(): ServerGameState {
     currentNumber: null,
     extractionCount: 0,
     isTimerRunning: false,
-    timerIntervalSeconds: 3,
+    timerIntervalSeconds: 5,
     numeroGold: null,
     goldWon: false,
     goldExpired: false,
@@ -157,7 +157,10 @@ wss.on('connection', (ws: WebSocket, req) => {
 
         case 'REGIA_EXTRACT': {
           const number = Number(msg.number);
-          if (number && !currentGameState.extractedNumbers.includes(number)) {
+          if (!Number.isInteger(number) || number < 1 || number > 90) {
+            break;
+          }
+          if (!currentGameState.extractedNumbers.includes(number)) {
             currentGameState.extractedNumbers.push(number);
             currentGameState.currentNumber = number;
             currentGameState.extractionCount = currentGameState.extractedNumbers.length;
@@ -165,7 +168,7 @@ wss.on('connection', (ws: WebSocket, req) => {
             currentGameState.updatedAt = Date.now();
           }
 
-          // Broadcast to all clients (including TV Studio)
+          // Broadcast to all connected screens except sender
           broadcast(
             {
               type: 'NUMBER_EXTRACTED',
@@ -176,7 +179,7 @@ wss.on('connection', (ws: WebSocket, req) => {
               timestamp: Date.now(),
               source: msg.source || 'regia'
             },
-            ws // Skip echoing to sender if requested, or keep it responsive
+            ws
           );
           break;
         }
@@ -217,16 +220,25 @@ wss.on('connection', (ws: WebSocket, req) => {
             type: 'GAME_RESET',
             state: currentGameState,
             timestamp: Date.now()
-          });
+          }, ws);
           break;
 
-        case 'WIN_DECLARED':
+        case 'WIN_DECLARED': {
+          const rawIds = Array.isArray(msg.winningCartellaIds)
+            ? msg.winningCartellaIds
+            : (msg.winningCartellaId ? [msg.winningCartellaId] : []);
+          const ids = rawIds.map((id: unknown) => String(id)).filter(Boolean);
           if (msg.winType && currentGameState.cartelleWins[msg.winType]) {
+            const prevWin = currentGameState.cartelleWins[msg.winType];
             currentGameState.cartelleWins[msg.winType] = {
+              ...prevWin,
               won: true,
-              cartellaId: msg.winningCartellaId,
-              winningNumbers: msg.winningNumbers || [],
-              winningRowIndex: msg.winningRowIndex
+              cartellaId: ids[0] || null,
+              winningCartellaIds: ids,
+              count: (Number(prevWin.count) || 0) + 1,
+              winningNumbers: Array.isArray(msg.winningNumbers) ? msg.winningNumbers : [],
+              winningRowIndex: msg.winningRowIndex,
+              ...(msg.winType === 'tombola' ? { gameEnded: true } : {}),
             };
           }
           currentGameState.lastEvent = `WIN_${msg.winType}`;
@@ -234,12 +246,13 @@ wss.on('connection', (ws: WebSocket, req) => {
           broadcast({
             type: 'WIN_DECLARED',
             winType: msg.winType,
-            winningCartellaIds: msg.winningCartellaIds,
-            winningNumbers: msg.winningNumbers,
+            winningCartellaIds: ids,
+            winningNumbers: Array.isArray(msg.winningNumbers) ? msg.winningNumbers : [],
             winningRowIndex: msg.winningRowIndex,
             timestamp: Date.now()
           }, ws);
           break;
+        }
 
         case 'UPDATE_UNCLAIMED':
           if (typeof msg.unclaimedPot === 'number') {

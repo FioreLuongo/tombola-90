@@ -3,12 +3,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { PDFDocument } from 'pdf-lib';
 import { ServerPersistentDb } from '../server-db';
 import {
+  buildDefaultRegiaGameConfig,
   buildEmptyJackpotBank,
   sanitizeJackpotBankData,
   type JackpotBankData,
 } from './firebase-jackpot-service';
+import { APPWRITE_GUIDE_PDF_BASE64 } from './appwrite-guide-pdf-data';
 import {
   isAppwriteConfigured,
   mapAppwriteDocToHistoryEntry,
@@ -277,4 +280,28 @@ test('ServerPersistentDb persists current game unclaimed, rollover accumulation,
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test('Appwrite step-by-step PDF asset is valid, 3 pages, and matches public static PDF', async () => {
+  const decoded = Buffer.from(APPWRITE_GUIDE_PDF_BASE64, 'base64');
+  assert.ok(decoded.length > 5000, 'PDF buffer must not be empty');
+  assert.equal(decoded.subarray(0, 5).toString('ascii'), '%PDF-');
+  assert.ok(decoded.subarray(-32).toString('ascii').includes('%%EOF'));
+
+  const publicPdfPath = path.resolve(process.cwd(), 'public/Guida_Configurazione_Appwrite_Tombola90.pdf');
+  const publicBytes = fs.readFileSync(publicPdfPath);
+  assert.equal(Buffer.compare(decoded, publicBytes), 0, 'Base64 TS asset must match public PDF byte-for-byte');
+
+  const parsed = await PDFDocument.load(decoded);
+  assert.equal(parsed.getPageCount(), 3);
+  assert.match(parsed.getTitle() || '', /Appwrite Cloud/i);
+});
+
+test('RegiaGameConfigDoc serialized payloadJson fits safely within Appwrite column size (4000)', () => {
+  const defaultConfig = buildDefaultRegiaGameConfig();
+  assert.equal(defaultConfig.prizes.currency, '£');
+  assert.equal(defaultConfig.prizes.prizePool, 0);
+  const json = JSON.stringify(defaultConfig);
+  assert.ok(json.length < 4000, `Expected payloadJson < 4000 chars, got ${json.length}`);
+});
+
 

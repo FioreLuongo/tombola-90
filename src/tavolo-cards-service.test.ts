@@ -13,6 +13,7 @@ import {
   generatePermanentTavoloSet,
   hydrateRuntimeCartelleFromTavoloSet,
   isCardActiveForMode,
+  withTimeout,
 } from './tavolo-cards-service';
 
 test('generatePermanentTavoloSet produces 30 authentic A4 sheets (TAV-G001, Foglio 01..30)', () => {
@@ -178,4 +179,20 @@ test('ServerPersistentDb persists permanent 30-sheet TAV-G001 set and activeShee
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+test('withTimeout resolves fast promises, preserves rejections, and rejects stalled promises', async () => {
+  const fastResult = await withTimeout(Promise.resolve('ok-value'), 100, 'Fast op');
+  assert.equal(fastResult, 'ok-value');
+
+  await assert.rejects(
+    () => withTimeout(Promise.reject(new Error('boom')), 100, 'Fail op'),
+    /boom/
+  );
+
+  const neverSettles = new Promise<string>(() => {});
+  await assert.rejects(
+    () => withTimeout(neverSettles, 25, 'Firestore test'),
+    /Firestore test timeout dopo 25ms/
+  );
 });
