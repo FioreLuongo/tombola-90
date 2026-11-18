@@ -103,3 +103,30 @@ test('deriveHealthCheckUrlFromWsUrl converts ws/wss endpoints to corresponding /
   );
   assert.equal(deriveHealthCheckUrlFromWsUrl('/ws', '/api/health'), '/api/health');
 });
+
+test('resolveRuntimeAppConfig supports Vercel standalone (null WS -> BroadcastChannel) and Vercel + Render WS bridge', () => {
+  const standalone = resolveRuntimeAppConfig({
+    viteAppUrl: '',
+    viteWsUrl: '',
+    windowProtocol: 'https:',
+    windowHost: 'tombola-90.vercel.app',
+    windowHostname: 'tombola-90.vercel.app',
+    windowOrigin: 'https://tombola-90.vercel.app',
+  });
+  assert.equal(standalone.environment, 'cloud');
+  assert.equal(standalone.wsUrl, null);
+  assert.equal(standalone.relativeWsUrl, null);
+
+  const bridgedToRender = resolveRuntimeAppConfig({
+    viteAppUrl: 'https://tombola-90.onrender.com',
+    viteWsUrl: 'wss://tombola-90.onrender.com/ws',
+    windowProtocol: 'https:',
+    windowHost: 'tombola-90.vercel.app',
+    windowHostname: 'tombola-90.vercel.app',
+    windowOrigin: 'https://tombola-90.vercel.app',
+  });
+  assert.equal(bridgedToRender.wsUrl, 'wss://tombola-90.onrender.com/ws');
+  assert.equal(bridgedToRender.healthCheckUrl, 'https://tombola-90.onrender.com/api/health');
+  assert.equal(bridgedToRender.hasExplicitExternalWsOverride, true);
+});
+

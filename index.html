@@ -300,12 +300,12 @@
             <!-- BOX DEDICATO: MESSA ONLINE & DOWNLOAD GUIDA PDF PASSO-PASSO -->
             <div class="regia-card regia-deploy-card" id="regiaDeployCard">
                 <div class="regia-card-header">
-                    <h3><i class="fas fa-cloud-upload-alt gold-text"></i> Messa Online Gratis (Render • Cloudflare • Firebase)</h3>
+                    <h3><i class="fas fa-cloud-upload-alt gold-text"></i> Messa Online Gratis (Render • Vercel • Cloudflare • Firebase)</h3>
                     <span class="regia-card-badge online-ready"><i class="fas fa-check-circle"></i> 100% Configurato</span>
                 </div>
                 <div class="regia-deploy-content">
                     <div class="regia-help-text" style="margin-bottom: 8px;">
-                        Tutto è pronto per pubblicare il tuo gioco gratis su <b>Render</b>, <b>Cloudflare Pages</b> o <b>Firebase Hosting</b> con Database Cloud attivo. Scarica la guida passo-passo o l'archivio ZIP:
+                        Tutto è pronto per pubblicare il tuo gioco gratis su <b>Render</b>, <b>Vercel</b>, <b>Cloudflare Pages</b> o <b>Firebase Hosting</b> con Database Cloud attivo. Scarica la guida passo-passo o l'archivio ZIP:
                     </div>
                     <div class="regia-deploy-actions-grid">
                         <button type="button" class="regia-deploy-action-btn pdf-btn" id="regiaDownloadGuidePdfBtn" title="Scarica la guida completa passo-passo in formato PDF (100% verificato per Adobe Acrobat Reader)">
@@ -313,6 +313,13 @@
                             <div class="deploy-btn-text">
                                 <b>Scarica Guida Messa Online (PDF Stampabile)</b>
                                 <span>File binario .PDF garantito al 100% per Adobe Acrobat Reader</span>
+                            </div>
+                        </button>
+                        <button type="button" class="regia-deploy-action-btn vercel-btn" id="regiaDownloadVercelPdfBtn" title="Scarica il PDF passo-passo dedicato al Deploy su Vercel (anche collegato a Render)">
+                            <i class="fas fa-rocket"></i>
+                            <div class="deploy-btn-text">
+                                <b>Scarica Guida Vercel Passo-Passo (.PDF)</b>
+                                <span>3 pagine A4: GitHub, vercel.json, Render WS &amp; Domini Cloud</span>
                             </div>
                         </button>
                         <button type="button" class="regia-deploy-action-btn view-btn" id="regiaOpenGuideModalBtn" title="Visualizza subito a schermo la guida e stampala in formato A4">
@@ -333,7 +340,7 @@
                     <div class="regia-deploy-params-pills">
                         <span class="deploy-pill"><i class="fas fa-shield-alt gold-text"></i> Accesso Regia: <b>Crittografia SHA-256 (Riservata)</b></span>
                         <span class="deploy-pill"><i class="fas fa-database gold-text"></i> Database Firestore: <b>agile-lamp-6xq1s</b></span>
-                        <span class="deploy-pill"><i class="fas fa-file-code" style="color: #38bdf8;"></i> Include: <b>render.yaml</b>, <b>firebase.json</b>, <b>_redirects</b></span>
+                        <span class="deploy-pill"><i class="fas fa-file-code" style="color: #38bdf8;"></i> Include: <b>render.yaml</b>, <b>vercel.json</b>, <b>firebase.json</b>, <b>_redirects</b></span>
                     </div>
                 </div>
             </div>
@@ -1175,12 +1182,19 @@ firebase deploy --only hosting</code></pre>
 
       <!-- Sezione 4: Vercel -->
       <div class="guide-section-block">
-        <h3 class="guide-step-title"><i class="fas fa-play"></i> 4. ALTERNATIVA VERCEL</h3>
-        <p class="guide-text">Anche Vercel è supportato nativamente grazie al file <code>vercel.json</code> già configurato:</p>
+        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:6px;">
+          <h3 class="guide-step-title" style="margin:0;"><i class="fas fa-rocket"></i> 4. CONFIGURAZIONE PASSO-PASSO SU VERCEL (Oltre a Render)</h3>
+          <button type="button" class="guide-action-btn btn-pdf" id="modalDownloadVercelPdfBtn" title="Scarica il PDF dedicato solo a Vercel (3 pagine A4)">
+            <i class="fas fa-file-pdf"></i> <span>Scarica Guida Vercel (.PDF)</span>
+          </button>
+        </div>
+        <p class="guide-text">Vercel è già configurato con <code>vercel.json</code> (Framework <b>Vite</b>, build <code>npm run build</code>, output <code>dist</code>) e può convivere con Render oppure collegarsi al WebSocket di Render:</p>
         <ol class="guide-ordered-list">
-          <li>Vai su <b>vercel.com</b> e fai login con GitHub.</li>
-          <li>Clicca su <b>"Add New..."</b> ➔ <b>"Project"</b>.</li>
-          <li>Fai Import della repository <code>tombola-90</code> e clicca <b>Deploy</b>. Il sito sarà attivo su <code>https://tombola-90.vercel.app</code>.</li>
+          <li>Assicurati che il codice aggiornato (con <code>vercel.json</code>) sia su GitHub (<code>git push -u origin main</code>).</li>
+          <li>Vai su <b>vercel.com</b> ➔ accedi con <b>GitHub</b> ➔ clicca <b>"Add New..."</b> ➔ <b>"Project"</b> ➔ <b>Import</b> su <code>tombola-90</code>.</li>
+          <li>Verifica i campi Build: <b>Framework Preset:</b> <code>Vite</code> • <b>Build Command:</b> <code>npm run build</code> • <b>Output Directory:</b> <code>dist</code>.</li>
+          <li><i>(Consigliato per collegare Vercel al server Render)</i> In <b>Environment Variables</b> aggiungi: <code>VITE_APP_URL=https://tombola-90.onrender.com</code> e <code>VITE_WS_URL=wss://tombola-90.onrender.com/ws</code>.</li>
+          <li>Clicca <b>Deploy</b>. Il sito sarà attivo su <span class="url-badge">https://tombola-90.vercel.app</span>.</li>
         </ol>
       </div>
 

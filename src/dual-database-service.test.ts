@@ -12,6 +12,7 @@ import {
   type JackpotBankData,
 } from './firebase-jackpot-service';
 import { APPWRITE_GUIDE_PDF_BASE64 } from './appwrite-guide-pdf-data';
+import { VERCEL_GUIDE_PDF_BASE64 } from './vercel-guide-pdf-data';
 import {
   isAppwriteConfigured,
   mapAppwriteDocToHistoryEntry,
@@ -303,5 +304,32 @@ test('RegiaGameConfigDoc serialized payloadJson fits safely within Appwrite colu
   const json = JSON.stringify(defaultConfig);
   assert.ok(json.length < 4000, `Expected payloadJson < 4000 chars, got ${json.length}`);
 });
+
+test('Vercel step-by-step PDF asset is valid, 3 pages, and matches public static PDF', async () => {
+  const decoded = Buffer.from(VERCEL_GUIDE_PDF_BASE64, 'base64');
+  assert.ok(decoded.length > 5000, 'Vercel PDF buffer must not be empty');
+  assert.equal(decoded.subarray(0, 5).toString('ascii'), '%PDF-');
+  assert.ok(decoded.subarray(-32).toString('ascii').includes('%%EOF'));
+
+  const publicPdfPath = path.resolve(process.cwd(), 'public/Guida_Deploy_Vercel_Tombola90.pdf');
+  const publicBytes = fs.readFileSync(publicPdfPath);
+  assert.equal(Buffer.compare(decoded, publicBytes), 0, 'Vercel Base64 TS asset must match public PDF byte-for-byte');
+
+  const parsed = await PDFDocument.load(decoded);
+  assert.equal(parsed.getPageCount(), 3);
+  assert.match(parsed.getTitle() || '', /Vercel/i);
+});
+
+test('vercel.json is valid Vite SPA configuration excluding /api/ from HTML rewrite', () => {
+  const vercelCfgPath = path.resolve(process.cwd(), 'vercel.json');
+  const parsed = JSON.parse(fs.readFileSync(vercelCfgPath, 'utf8'));
+  assert.equal(parsed.framework, 'vite');
+  assert.equal(parsed.buildCommand, 'npm run build');
+  assert.equal(parsed.outputDirectory, 'dist');
+  assert.ok(Array.isArray(parsed.rewrites) && parsed.rewrites.length >= 1);
+  assert.equal(parsed.rewrites[0].destination, '/index.html');
+  assert.ok(String(parsed.rewrites[0].source).includes('api/'));
+});
+
 
 

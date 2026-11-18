@@ -1,5 +1,6 @@
 import { ONLINE_GUIDE_PDF_BASE64 } from './guide-pdf-data';
 import { APPWRITE_GUIDE_PDF_BASE64 } from './appwrite-guide-pdf-data';
+import { VERCEL_GUIDE_PDF_BASE64 } from './vercel-guide-pdf-data';
 
 /**
  * Gestore Ufficiale della Guida Messa Online e Download PDF/ZIP
@@ -157,6 +158,23 @@ export function downloadAppwriteGuidePDF(e?: Event) {
 }
 
 /**
+ * Scarica la guida deploy Vercel (accanto a Render) in PDF convertendo la costante Base64 in Blob binario.
+ */
+export function downloadVercelGuidePDF(e?: Event) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  triggerBase64PdfDownload(
+    VERCEL_GUIDE_PDF_BASE64,
+    'Guida_Deploy_Vercel_Tombola90.pdf',
+    'Guida_Deploy_Vercel_Tombola90.pdf',
+    'Il file <b>Guida_Deploy_Vercel_Tombola90.pdf</b> (3 pagine A4 con passaggi Vercel + collegamento Render) è pronto per Adobe Acrobat Reader.'
+  );
+}
+
+/**
  * Scarica il pacchetto ZIP completo del progetto.
  */
 export async function downloadProjectZip(e?: Event) {
@@ -290,6 +308,7 @@ export function initOnlineGuideManager() {
   const w = window as any;
   w.downloadOnlineGuidePDF = downloadOnlineGuidePDF;
   w.downloadAppwriteGuidePDF = downloadAppwriteGuidePDF;
+  w.downloadVercelGuidePDF = downloadVercelGuidePDF;
   w.downloadProjectZip = downloadProjectZip;
   w.openOnlineGuideModal = openOnlineGuideModal;
   w.closeOnlineGuideModal = closeOnlineGuideModal;
@@ -308,6 +327,7 @@ export function initOnlineGuideManager() {
   bindBtn('regiaHeaderDownloadGuidePdfBtn', openOnlineGuideModal);
   bindBtn('regiaHeaderDirectPdfBtn', downloadOnlineGuidePDF);
   bindBtn('regiaDownloadGuidePdfBtn', downloadOnlineGuidePDF);
+  bindBtn('regiaDownloadVercelPdfBtn', downloadVercelGuidePDF);
   bindBtn('regiaOpenGuideModalBtn', openOnlineGuideModal);
   bindBtn('regiaDownloadCodeZipBtn', downloadProjectZip);
 
@@ -327,6 +347,7 @@ export function initOnlineGuideManager() {
   bindBtn('modalCloseHeaderBtn', closeOnlineGuideModal);
   bindBtn('modalDownloadPdfBtn', downloadOnlineGuidePDF);
   bindBtn('modalDownloadFooterBtn', downloadOnlineGuidePDF);
+  bindBtn('modalDownloadVercelPdfBtn', downloadVercelGuidePDF);
   bindBtn('modalPrintGuideBtn', printOnlineGuide);
   bindBtn('modalPrintFooterBtn', printOnlineGuide);
   bindBtn('modalDownloadZipBtn', downloadProjectZip);

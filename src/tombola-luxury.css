@@ -5313,6 +5313,18 @@ nav > .box-id-badge {
   box-shadow: 0 5px 15px rgba(245, 158, 11, 0.4);
 }
 
+.regia-deploy-action-btn.vercel-btn {
+  background: linear-gradient(135deg, #111827 0%, #1e293b 100%);
+  color: #ffffff !important;
+  border: 1px solid #cbd5e1;
+}
+
+.regia-deploy-action-btn.vercel-btn:hover {
+  background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 5px 15px rgba(248, 250, 252, 0.25);
+}
+
 .regia-deploy-action-btn i {
   font-size: 24px;
   flex-shrink: 0;
